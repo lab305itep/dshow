@@ -1,10 +1,12 @@
 #include <TApplication.h>
 #include <TGClient.h>
 #include <TCanvas.h>
+#include <TColor.h>
 #include <TBox.h>
 #include <TGButton.h>
 #include <TGButtonGroup.h>
 #include <TGComboBox.h>
+#include <TGFileDialog.h>
 #include <TGLabel.h>
 #include <TGNumberEntry.h>
 #include <TGStatusBar.h>
@@ -12,7 +14,9 @@
 #include <TGraph.h>
 #include <TH2D.h>
 #include <TRootEmbeddedCanvas.h>
+#include <TString.h>
 #include <TStyle.h>
+#include <TSystem.h>
 #include <TThread.h>
 #include <arpa/inet.h>
 #include <libconfig.h>
@@ -26,6 +30,8 @@
 #include "dshow.h"
 #include "recformat.h"
 
+const char *DataFileTypes[] = {"All files", "*", "Data files", "*.dat*", 0, 0};
+
 /*	Class dshowMainFrame - the main window		*/
 /*	Main window Constructor				*/
 dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h) : TGMainFrame(p, w, h) 
@@ -33,6 +39,10 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h) : TGMainFr
 	char strs[64];
 	char strl[1024];
 	Int_t StatusBarParts[] = {10, 10, 10, 10, 10, 50};	// status bar parts
+	Double_t r[]    = {0., 0.0, 1.0, 1.0, 1.0};
+   	Double_t g[]    = {0., 0.0, 0.0, 1.0, 1.0};
+   	Double_t b[]    = {0., 1.0, 0.0, 0.0, 1.0};
+   	Double_t stop[] = {0., .25, .50, .75, 1.0};
 	int i;
 	TGLabel *lb;
 	
@@ -56,6 +66,14 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h) : TGMainFr
 		CommonData->hTimeB[i] = new TH2D(strs, strl, 64, 0, 64, 100, 0, 800);
 		CommonData->hTimeB[i]->SetLineColor(kBlue);
 	}
+
+	PlayFile = new TGFileInfo();
+	PlayFile->fFileTypes = DataFileTypes;
+	PlayFile->fIniDir = strdup(".");
+	PlayFile->SetMultipleSelection(1);
+	myDir = getcwd(NULL, 0);
+
+   	PaletteStart = TColor::CreateGradientColorTable(5, stop, r, g, b, 100);
 
 	//
 	//	Create Main window structure
@@ -91,6 +109,16 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h) : TGMainFr
 	nChan = new TGNumberEntry(vframe, 0, 2, -1, TGNumberFormat::kNESInteger, TGNumberFormat::kNEANonNegative, TGNumberFormat::kNELLimitMinMax, 0, 63);
 	nChan->SetIntNumber(0);
    	vframe->AddFrame(nChan, new TGLayoutHints(kLHintsCenterX  | kLHintsTop, 5, 5, 3, 4));
+
+   	TGTextButton *play = new TGTextButton(vframe,"&Play file");
+	play->Connect("Clicked()", "dshowMainFrame", this, "PlayFileDialog()");
+   	vframe->AddFrame(play, new TGLayoutHints(kLHintsCenterX | kLHintsTop, 5, 5, 3, 4));
+
+	lb = new TGLabel(vframe, "Blocks/s:");
+   	vframe->AddFrame(lb, new TGLayoutHints(kLHintsLeft | kLHintsTop, 5, 5, 3, 4));
+	nPlayBlocks = new TGNumberEntry(vframe, 0, 8, -1, TGNumberFormat::kNESInteger, TGNumberFormat::kNEANonNegative);
+	nPlayBlocks->SetIntNumber(0);
+   	vframe->AddFrame(nPlayBlocks, new TGLayoutHints(kLHintsCenterX  | kLHintsTop, 5, 5, 3, 4));
 
    	TGTextButton *exit = new TGTextButton(vframe,"&Exit ");
 	exit->Connect("Clicked()", "dshowMainFrame", this, "SendCloseMessage()");
@@ -406,7 +434,7 @@ void dshowMainFrame::DrawEvent(TCanvas *cv)
 		i = CommonData->Event[n].xy;
 		j = CommonData->Event[n].z / 2;
 		k = CommonData->Event[n].z & 1;
-		PmtBox.SetLineColor(1179 + CommonData->Event[n].amp/16);
+		PmtBox.SetLineColor(PaletteStart + CommonData->Event[n].amp/16);
 		PmtBox.DrawBox(0.05 + 0.5*k + 0.08*i, 0.1 + 0.16*j, 0.13 + 0.5*k + 0.08*i, 0.26 +0.16*j);
 	}
 
@@ -415,11 +443,37 @@ void dshowMainFrame::DrawEvent(TCanvas *cv)
 		i = CommonData->Event[n].xy;
 		j = CommonData->Event[n].z / 2;
 		k = CommonData->Event[n].z & 1;
-		SipmBox.SetFillColor(1179 + CommonData->Event[n].amp/16);
+		SipmBox.SetFillColor(PaletteStart + CommonData->Event[n].amp/16);
 		SipmBox.DrawBox(0.05 + 0.5*k + 0.016*i, 0.1 + 0.008*k + 0.016*j, 0.066 + 0.5*k + 0.016*i, 0.108 + 0.008*k + 0.016*j);
 	}
 
 	CommonData->EventHits = 0;
+}
+
+/*	show file open dialog to play data file			*/
+void dshowMainFrame::PlayFileDialog(void)
+{
+	TString *cmd;
+	TObject *ptr;
+	
+	new TGFileDialog(gClient->GetRoot(), this, kFDOpen, PlayFile);
+	
+	ptr = PlayFile->fFileNamesList->First();
+	if (ptr) {
+		cmd = new TString(myDir);
+		*cmd += "/dplay -p ";
+		*cmd += TString::Itoa(UDPPORT, 10);
+		*cmd += " -s ";
+		*cmd += TString::Itoa(nPlayBlocks->GetIntNumber(), 10);
+		for (; ptr; ptr = PlayFile->fFileNamesList->After(ptr)) {
+			*cmd += " ";
+			*cmd += ptr->GetName();			
+		}
+		*cmd += " &";
+		printf("CMD: %s\n", cmd->Data());
+		system(cmd->Data());
+		delete cmd;
+	}
 }
 
 /*	Process an event					*/
@@ -574,7 +628,7 @@ void dshowMainFrame::ChangeTimeBThr(void)
 void dshowMainFrame::ReadConfig(const char *fname)
 {
 	config_t cnf;
-	int tmp;
+	long tmp;
 	int i, j, k, type, xy, z;
 	config_setting_t *ptr_xy;
 	config_setting_t *ptr_z;

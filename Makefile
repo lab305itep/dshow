@@ -1,6 +1,5 @@
-#ROOTCINT=rootcint
-ROOTCINT=rootcling
-
+ROOTCINT=rootcint
+#ROOTCINT=rootcling
 
 all : dshow dplay
 
@@ -11,4 +10,4 @@ dshowDict.cpp : dshowLinkDef.h dshow.h
 	$(ROOTCINT) -f dshowDict.cpp -c dshow.h dshowLinkDef.h
 
 dplay : dplay.cpp
-
+	g++ -o dplay dplay.cpp

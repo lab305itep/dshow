@@ -8,6 +8,7 @@
 
 class TCanvas;
 class TGCheckButton;
+class TGFileInfo;
 class TGNumberEntry;
 class TGRadioButton;
 class TGStatusBar;
@@ -95,11 +96,15 @@ private:
 	TGNumberEntry *nSiPMThreshold;
 	TGNumberEntry *nPMTSumThreshold;
 	TGNumberEntry *nSiPMSumThreshold;
+	int PaletteStart;
 //		Right buttons
 	TGCheckButton *Pause;
 	TGNumberEntry *nRefresh;
 	TGNumberEntry *nWFD;
 	TGNumberEntry *nChan;
+	TGFileInfo *PlayFile;
+	TGNumberEntry *nPlayBlocks;
+	char *myDir;
 
 	int TimerCnt;
 	void ProcessEvent(char *data);
@@ -120,6 +125,7 @@ public:
 	void ResetTimeHists(void);
 	void ChangeTimeBThr(void);
 	void OnTimer(void);
+	void PlayFileDialog(void);
 	void ReadConfig(const char *fname);
 	friend void *DataThreadFunction(void *ptr);
 	ClassDef(dshowMainFrame, 0)
