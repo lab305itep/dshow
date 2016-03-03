@@ -1,7 +1,12 @@
+//		Simple data analysis and show for DANSS
+//	I.G. Alekseev & D.N. Svirida, ITEP, Moscow, 2016
+
+#define _FILE_OFFSET_BITS 64
 #include <TApplication.h>
 #include <TGClient.h>
 #include <TCanvas.h>
 #include <TColor.h>
+#include <TGaxis.h>
 #include <TBox.h>
 #include <TGButton.h>
 #include <TGButtonGroup.h>
@@ -9,10 +14,13 @@
 #include <TGFileDialog.h>
 #include <TGLabel.h>
 #include <TGNumberEntry.h>
+#include <TGProgressBar.h>
+#include <TGDoubleSlider.h>
 #include <TGStatusBar.h>
 #include <TGTab.h>
 #include <TGraph.h>
 #include <TH2D.h>
+#include <TLegend.h>
 #include <TRootEmbeddedCanvas.h>
 #include <TString.h>
 #include <TStyle.h>
@@ -31,6 +39,7 @@
 #include "recformat.h"
 
 const char *DataFileTypes[] = {"All files", "*", "Data files", "*.dat*", 0, 0};
+const char *RateName[] = {"All", "NO veto"};
 
 /*	Class dshowMainFrame - the main window		*/
 /*	Main window Constructor				*/
@@ -39,18 +48,20 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h) : TGMainFr
 	char strs[64];
 	char strl[1024];
 	Int_t StatusBarParts[] = {10, 10, 10, 10, 10, 50};	// status bar parts
-	Double_t r[]    = {0., 0.0, 1.0, 1.0, 1.0};
-   	Double_t g[]    = {0., 0.0, 0.0, 1.0, 1.0};
-   	Double_t b[]    = {0., 1.0, 0.0, 0.0, 1.0};
-   	Double_t stop[] = {0., .25, .50, .75, 1.0};
+	Double_t RGB_r[]    = {0., 0.0, 1.0, 1.0, 1.0};
+   	Double_t RGB_g[]    = {0., 0.0, 0.0, 1.0, 1.0};
+   	Double_t RGB_b[]    = {0., 1.0, 0.0, 0.0, 1.0};
+   	Double_t RGB_stop[] = {0., .25, .50, .75, 1.0};
 	int i;
 	TGLabel *lb;
 	
 	// Create our data structures and histogramms
 	CommonData = (struct common_data_struct *) malloc(sizeof(struct common_data_struct));
 	memset(CommonData, 0, sizeof(struct common_data_struct));
+	PlayThread = NULL;
 
-	gStyle->SetOptStat(0);
+	gStyle->SetOptStat("e");
+	gStyle->SetOptFit(111);
 	for(i=0; i<MAXWFD; i++) {
 		snprintf(strs, sizeof(strs), "hAmpS%2.2d", i+1);
 		snprintf(strl, sizeof(strl), "Module %2.2d: amplitude versus channels number (self)", i+1);		
@@ -66,14 +77,53 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h) : TGMainFr
 		CommonData->hTimeB[i] = new TH2D(strs, strl, 64, 0, 64, 100, 0, 800);
 		CommonData->hTimeB[i]->SetLineColor(kBlue);
 	}
+//	TLegend
+	TimeLegend = new TLegend(0.76, 0.8, 0.97, 0.88);
+	TimeLegend->AddEntry(CommonData->hTimeA[0], "All events", "L");
+	TimeLegend->AddEntry(CommonData->hTimeB[0], "Amplitude above threshold", "L");
+
+//	TH1D *hSiPMsum[2];	// SiPM summa, all/no veto
+	CommonData->hSiPMsum[0] = new TH1D("hSiPMsum0", "Sum of all SiPM counts, MeV", 200, 0, 10.0);
+	CommonData->hSiPMsum[1] = new TH1D("hSiPMsum1", "Sum of all SiPM counts, no veto, MeV", 200, 0, 10.0);
+	CommonData->hSiPMsum[1]->SetLineColor(kBlue);
+//	TH1D *hSiPMhits[2];	// SiPM Hits, all/no veto
+	CommonData->hSiPMhits[0] = new TH1D("hSiPMhits0", "Number of SiPM hits per event", 200, 0, 200);
+	CommonData->hSiPMhits[1] = new TH1D("hSiPMhits1", "Number of SiPM hits per event, no veto", 200, 0, 200);
+	CommonData->hSiPMhits[1]->SetLineColor(kBlue);
+//	TH1D *hPMTsum[2];	// PMT summa, all/no veto
+	CommonData->hPMTsum[0] = new TH1D("hPMTsum0", "Sum of all PMT counts, MeV", 200, 0, 10.0);
+	CommonData->hPMTsum[1] = new TH1D("hPMTsum1", "Sum of all PMT counts, no veto, MeV", 200, 0, 10.0);
+	CommonData->hPMTsum[1]->SetLineColor(kBlue);
+//	TH1D *hPMThits[2];	// PMT Hits, all/no veto
+	CommonData->hPMThits[0] = new TH1D("hPMThits0", "Number of PMT hits per event", 50, 0, 50);
+	CommonData->hPMThits[1] = new TH1D("hPMThits1", "Number of PMT hits per event, no veto", 50, 0, 50);
+	CommonData->hPMThits[1]->SetLineColor(kBlue);
+//	TH1D *hSPRatio[2];	// SiPM sum to PTMT sum ratio, all/no veto
+	CommonData->hSPRatio[0] = new TH1D("hSPRatio0", "SiPM to PMT ratio", 100, 0, 5.0);
+	CommonData->hSPRatio[1] = new TH1D("hSPRatio1", "SiPM to PMT ratio, no veto", 100, 0, 5.0);
+	CommonData->hSPRatio[1]->SetLineColor(kBlue);
+//	TLegend
+	SummaLegend = new TLegend(0.6, 0.1, 0.9, 0.3);
+	SummaLegend->AddEntry(CommonData->hSiPMsum[0], "All events", "L");
+	SummaLegend->AddEntry(CommonData->hSiPMsum[1], "NO veto", "L");
+
+//	Rate
+	CommonData->hRate = new TH1D("hRate", "Trigger rate, Hz", RATELEN, 0, RATELEN);
+	CommonData->hRate->SetStats(0);
+	CommonData->hRate->SetMarkerStyle(20);
+	CommonData->hRate->SetMarkerColor(kBlue);
+	CommonData->fRate = (float *) malloc(RATELEN * sizeof(float));
+	memset(CommonData->fRate, 0, RATELEN * sizeof(float));
+	CommonData->iRatePos = 0;
+	CommonData->gLastTime = -1;
 
 	PlayFile = new TGFileInfo();
 	PlayFile->fFileTypes = DataFileTypes;
 	PlayFile->fIniDir = strdup(".");
 	PlayFile->SetMultipleSelection(1);
-	myDir = getcwd(NULL, 0);
 
-   	PaletteStart = TColor::CreateGradientColorTable(5, stop, r, g, b, 100);
+   	PaletteStart = TColor::CreateGradientColorTable(sizeof(RGB_stop) / sizeof(RGB_stop[0]), RGB_stop, RGB_r, RGB_g, RGB_b, MAXRGB);
+	gStyle->SetPalette();
 
 	//
 	//	Create Main window structure
@@ -86,6 +136,8 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h) : TGMainFr
 	CreateSpectrumTab(tab);
 	CreateTimeTab(tab);
 	CreateEventTab(tab);
+	CreateSummaTab(tab);
+	CreateRateTab(tab);
 	hframe->AddFrame(tab, new TGLayoutHints(kLHintsExpandX | kLHintsExpandY, 5, 5, 3, 4));
 	
    	TGVerticalFrame *vframe=new TGVerticalFrame(hframe, 50, h);
@@ -110,15 +162,29 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h) : TGMainFr
 	nChan->SetIntNumber(0);
    	vframe->AddFrame(nChan, new TGLayoutHints(kLHintsCenterX  | kLHintsTop, 5, 5, 3, 4));
 
-   	TGTextButton *play = new TGTextButton(vframe,"&Play file");
-	play->Connect("Clicked()", "dshowMainFrame", this, "PlayFileDialog()");
-   	vframe->AddFrame(play, new TGLayoutHints(kLHintsCenterX | kLHintsTop, 5, 5, 3, 4));
+	TGGroupFrame *grPlay = new TGGroupFrame(vframe, "Play a file", kVerticalFrame);
+	
+   	TGTextButton *open = new TGTextButton(grPlay,"&Open");
+	open->Connect("Clicked()", "dshowMainFrame", this, "PlayFileDialog()");
+   	grPlay->AddFrame(open, new TGLayoutHints(kLHintsCenterX | kLHintsTop, 5, 5, 3, 4));
 
-	lb = new TGLabel(vframe, "Blocks/s:");
-   	vframe->AddFrame(lb, new TGLayoutHints(kLHintsLeft | kLHintsTop, 5, 5, 3, 4));
-	nPlayBlocks = new TGNumberEntry(vframe, 0, 8, -1, TGNumberFormat::kNESInteger, TGNumberFormat::kNEANonNegative);
+   	TGTextButton *stop = new TGTextButton(grPlay,"&Stop");
+	stop->Connect("Clicked()", "dshowMainFrame", this, "PlayFileStop()");
+   	grPlay->AddFrame(stop, new TGLayoutHints(kLHintsCenterX | kLHintsTop, 5, 5, 3, 4));
+
+	lb = new TGLabel(grPlay, "Blocks/s:");
+   	grPlay->AddFrame(lb, new TGLayoutHints(kLHintsLeft | kLHintsTop, 5, 5, 3, 4));
+	nPlayBlocks = new TGNumberEntry(grPlay, 0, 8, -1, TGNumberFormat::kNESInteger, TGNumberFormat::kNEANonNegative);
 	nPlayBlocks->SetIntNumber(0);
-   	vframe->AddFrame(nPlayBlocks, new TGLayoutHints(kLHintsCenterX  | kLHintsTop, 5, 5, 3, 4));
+   	grPlay->AddFrame(nPlayBlocks, new TGLayoutHints(kLHintsCenterX  | kLHintsTop, 5, 5, 3, 4));
+
+	PlayProgress = new TGHProgressBar(grPlay, TGProgressBar::kStandard, 100);
+	PlayProgress->ShowPosition();
+	PlayProgress->SetBarColor("green");
+	PlayProgress->SetRange(0.0, 100.0);
+	grPlay->AddFrame(PlayProgress, new TGLayoutHints(kLHintsExpandX  | kLHintsTop, 5, 5, 3, 1));
+
+   	vframe->AddFrame(grPlay, new TGLayoutHints(kLHintsCenterX  | kLHintsTop, 5, 5, 3, 4));
 
    	TGTextButton *exit = new TGTextButton(vframe,"&Exit ");
 	exit->Connect("Clicked()", "dshowMainFrame", this, "SendCloseMessage()");
@@ -151,10 +217,12 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h) : TGMainFr
 dshowMainFrame::~dshowMainFrame(void) 
 {
 	CommonData->iStop = 1;
+	iPlayStop = 1;
 	delete OneSecond;
 	DataThread->Join();
+	if (PlayThread) PlayThread->Join();
 	Cleanup();
-	if (CommonData->Event) free(CommonData->Event);
+//		all memory will be freed without us anyway...
 }
 
 /*	When main window is closed			*/
@@ -285,27 +353,77 @@ void dshowMainFrame::CreateEventTab(TGTab *tab)
    	hframe->AddFrame(lb, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));		
 	nPMTThreshold = new TGNumberEntry(hframe, 0, 5, -1, TGNumberFormat::kNESInteger, TGNumberFormat::kNEANonNegative);
 	nPMTThreshold->SetIntNumber(10);
-   	hframe->AddFrame(nPMTThreshold, new TGLayoutHints(kLHintsLeft  | kLHintsCenterY, 5, 5, 3, 4));
+   	hframe->AddFrame(nPMTThreshold, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));
 
 	lb = new TGLabel(hframe, "SiPM Threshold:");
    	hframe->AddFrame(lb, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));		
 	nSiPMThreshold = new TGNumberEntry(hframe, 0, 5, -1, TGNumberFormat::kNESInteger, TGNumberFormat::kNEANonNegative);
 	nSiPMThreshold->SetIntNumber(10);
-   	hframe->AddFrame(nSiPMThreshold, new TGLayoutHints(kLHintsLeft  | kLHintsCenterY, 5, 5, 3, 4));
+   	hframe->AddFrame(nSiPMThreshold, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));
 
 	lb = new TGLabel(hframe, "PMT Sum Threshold:");
    	hframe->AddFrame(lb, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));		
 	nPMTSumThreshold = new TGNumberEntry(hframe, 0, 5, -1, TGNumberFormat::kNESInteger, TGNumberFormat::kNEANonNegative);
 	nPMTSumThreshold->SetIntNumber(100);
-   	hframe->AddFrame(nPMTSumThreshold, new TGLayoutHints(kLHintsLeft  | kLHintsCenterY, 5, 5, 3, 4));
+   	hframe->AddFrame(nPMTSumThreshold, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));
 
 	lb = new TGLabel(hframe, "SiPM Sum Threshold:");
    	hframe->AddFrame(lb, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));		
 	nSiPMSumThreshold = new TGNumberEntry(hframe, 0, 5, -1, TGNumberFormat::kNESInteger, TGNumberFormat::kNEANonNegative);
 	nSiPMSumThreshold->SetIntNumber(100);
-   	hframe->AddFrame(nSiPMSumThreshold, new TGLayoutHints(kLHintsLeft  | kLHintsCenterY, 5, 5, 3, 4));
+   	hframe->AddFrame(nSiPMSumThreshold, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));
 
     	me->AddFrame(hframe, new TGLayoutHints(kLHintsBottom | kLHintsExpandX, 2, 2, 2, 2));
+}
+
+/*	Create event summa tab				*/
+void dshowMainFrame::CreateSummaTab(TGTab *tab)
+{
+	TGLabel *lb;
+
+	TGCompositeFrame *me = tab->AddTab("Summa");
+
+	fSummaCanvas = new TRootEmbeddedCanvas ("SummaCanvas", me, 1600, 800);
+   	me->AddFrame(fSummaCanvas, new TGLayoutHints(kLHintsExpandX | kLHintsExpandY, 10, 10, 10, 1));
+
+   	TGHorizontalFrame *hframe=new TGHorizontalFrame(me);
+
+	lb = new TGLabel(hframe, "SiPM Threshold:");
+   	hframe->AddFrame(lb, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));		
+	SummaSiPMThreshold = new TGNumberEntry(hframe, 0, 5, -1, TGNumberFormat::kNESInteger, TGNumberFormat::kNEANonNegative);
+	CommonData->SummaSiPMThreshold = 30;
+	SummaSiPMThreshold->SetIntNumber(CommonData->SummaSiPMThreshold);
+	SummaSiPMThreshold->Connect("ValueChanged(Long_t)", "dshowMainFrame", this, "ChangeSummaPars()");
+   	hframe->AddFrame(SummaSiPMThreshold, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));
+
+	lb = new TGLabel(hframe, "SiPM Time range, ns:");
+   	hframe->AddFrame(lb, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 15, 5, 3, 4));
+	lbSiPMtime[0] = new TGLabel(hframe, "160.0");
+   	hframe->AddFrame(lbSiPMtime[0], new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));
+	SummaSiPMtime = new TGDoubleHSlider(hframe, 200, kDoubleScaleNo);
+	SummaSiPMtime->SetRange(0, 500);
+	CommonData->SummaSiPMtime[0] = 160.0;
+	CommonData->SummaSiPMtime[1] = 240.0;
+	SummaSiPMtime->SetPosition(CommonData->SummaSiPMtime[0], CommonData->SummaSiPMtime[1]);
+	SummaSiPMtime->Connect("PositionChanged()", "dshowMainFrame", this, "ChangeSummaPars()");
+   	hframe->AddFrame(SummaSiPMtime, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));
+	lbSiPMtime[1] = new TGLabel(hframe, "240.0");
+   	hframe->AddFrame(lbSiPMtime[1], new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));
+
+   	TGTextButton *reset = new TGTextButton(hframe,"&Reset");
+	reset->Connect("Clicked()", "dshowMainFrame", this, "ResetSummaHists()");
+   	hframe->AddFrame(reset, new TGLayoutHints(kLHintsCenterY | kLHintsRight, 5, 5, 3, 4));
+
+    	me->AddFrame(hframe, new TGLayoutHints(kLHintsBottom | kLHintsExpandX, 2, 2, 2, 2));
+}
+
+/*	Create event rate tab				*/
+void dshowMainFrame::CreateRateTab(TGTab *tab)
+{
+	TGCompositeFrame *me = tab->AddTab("Rates");
+
+	fRateCanvas = new TRootEmbeddedCanvas ("RateCanvas", me, 1600, 800);
+   	me->AddFrame(fRateCanvas, new TGLayoutHints(kLHintsExpandX | kLHintsExpandY, 10, 10, 10, 1));
 }
 
 /*	Timer interrupt - once per second		*/
@@ -325,6 +443,7 @@ void dshowMainFrame::DoDraw(void)
 	char str[1024];
    	TCanvas *fCanvas;
 	int mod, chan;
+	int i, j;
 
 	mod = nWFD->GetIntNumber() - 1;
 	chan = nChan->GetIntNumber();
@@ -361,13 +480,21 @@ void dshowMainFrame::DoDraw(void)
    	fCanvas = fSelfCanvas->GetCanvas();
    	fCanvas->cd();
 	if (rSelf2D->IsOn()) {
+		sprintf(str, "Module: %d. Amplitude versus channel number.", mod + 1);
+		CommonData->hAmpS[mod]->SetTitle(str);
 		CommonData->hAmpS[mod]->Draw("color");
 	} else if (rSelfChan->IsOn()) {
+		sprintf(str, "Module: %d. Channel occupancy.", mod + 1);
+		CommonData->hAmpS[mod]->ProjectionX()->SetTitle(str);
 		CommonData->hAmpS[mod]->ProjectionX()->Draw();	
 	} else if (rSelfAll->IsOn()) {
+		sprintf(str, "Module: %d. Amplitude distribution for all channels.", mod + 1);
+		CommonData->hAmpS[mod]->ProjectionY()->SetTitle(str);
 		CommonData->hAmpS[mod]->ProjectionY()->Draw();
 	} else if (rSelfSingle->IsOn()) {
-		CommonData->hAmpS[mod]->ProjectionY("_py", chan+1, chan+1)->Draw();
+		sprintf(str, "Module: %d. Amplitude distribution for channel %d.", mod + 1, chan);
+		CommonData->hAmpS[mod]->ProjectionY("_py", chan + 1, chan + 1)->SetTitle(str);
+		CommonData->hAmpS[mod]->ProjectionY("_py", chan + 1, chan + 1)->Draw();
 	}
    	fCanvas->Update();
 
@@ -375,30 +502,83 @@ void dshowMainFrame::DoDraw(void)
    	fCanvas = fSpectrumCanvas->GetCanvas();
    	fCanvas->cd();
 	if (rSpect2D->IsOn()) {
+		sprintf(str, "Module: %d. Amplitude versus channel number.", mod + 1);
+		CommonData->hAmpE[mod]->SetTitle(str);
 		CommonData->hAmpE[mod]->Draw("color");
 	} else if (rSpectChan->IsOn()) {
+		sprintf(str, "Module: %d. Channel occupancy.", mod + 1);
+		CommonData->hAmpE[mod]->ProjectionX()->SetTitle(str);
 		CommonData->hAmpE[mod]->ProjectionX()->Draw();	
 	} else if (rSpectAll->IsOn()) {
+		sprintf(str, "Module: %d. Amplitude distribution for all channels.", mod + 1);
+		CommonData->hAmpE[mod]->ProjectionY()->SetTitle(str);
 		CommonData->hAmpE[mod]->ProjectionY()->Draw();
 	} else if (rSpectSingle->IsOn()) {
-		CommonData->hAmpE[mod]->ProjectionY("_py", chan+1, chan+1)->Draw();
+		sprintf(str, "Module: %d. Amplitude distribution for channel %d.", mod + 1, chan);
+		CommonData->hAmpE[mod]->ProjectionY("_py", chan + 1, chan + 1)->SetTitle(str);
+		CommonData->hAmpE[mod]->ProjectionY("_py", chan + 1, chan + 1)->Draw();
 	}
    	fCanvas->Update();
+
 /*		Times				*/
    	fCanvas = fTimeCanvas->GetCanvas();
    	fCanvas->cd();
 	if (rTimeAll->IsOn()) {
+		sprintf(str, "Module: %d. Time distribution for all channels.", mod + 1);
+		CommonData->hTimeA[mod]->ProjectionY()->SetTitle(str);
 		CommonData->hTimeA[mod]->ProjectionY()->Draw();
 		CommonData->hTimeB[mod]->ProjectionY()->Draw("same");
 	} else if (rTimeSingle->IsOn()) {
-		CommonData->hTimeA[mod]->ProjectionY("_py", chan+1, chan+1)->Draw();
-		CommonData->hTimeB[mod]->ProjectionY("_py", chan+1, chan+1)->Draw("same");
+		sprintf(str, "Module: %d. Time distribution for channel %d.", mod + 1, chan);
+		CommonData->hTimeA[mod]->ProjectionY("_py", chan + 1, chan + 1)->SetTitle(str);
+		CommonData->hTimeA[mod]->ProjectionY("_py", chan + 1, chan + 1)->Draw();
+		CommonData->hTimeB[mod]->ProjectionY("_py", chan + 1, chan + 1)->Draw("same");
 	}
+	TimeLegend->Draw();
    	fCanvas->Update();
+
 /*		Event display			*/
    	fCanvas = fEventCanvas->GetCanvas();
    	fCanvas->cd();
 	DrawEvent(fCanvas);
+   	fCanvas->Update();
+
+/*		Summa				*/
+   	fCanvas = fSummaCanvas->GetCanvas();
+   	fCanvas->cd();
+	fCanvas->Clear();
+	fCanvas->Divide(3, 2);
+//	TH1D *hSiPMsum[2];	// SiPM summa, all/no veto
+   	fCanvas->cd(1);
+	CommonData->hSiPMsum[0]->Draw();
+	CommonData->hSiPMsum[1]->Draw("same");
+//	TH1D *hSiPMhits[2];	// SiPM Hits, all/no veto
+   	fCanvas->cd(2);
+	CommonData->hSiPMhits[0]->Draw();
+	CommonData->hSiPMhits[1]->Draw("same");
+//	TH1D *hPMTsum[2];	// PMT summa, all/no veto
+   	fCanvas->cd(4);
+	CommonData->hPMTsum[0]->Draw();
+	CommonData->hPMTsum[1]->Draw("same");
+//	TH1D *hPMThits[2];	// PMT Hits, all/no veto
+   	fCanvas->cd(5);
+	CommonData->hPMThits[0]->Draw();
+	CommonData->hPMThits[1]->Draw("same");
+//	TH1D *hSPRatio[2];	// SiPM sum to PTMT sum ratio, all/no veto
+   	fCanvas->cd(3);
+	CommonData->hSPRatio[0]->Draw();
+	CommonData->hSPRatio[1]->Draw("same");
+//	TLegend
+   	fCanvas->cd(6);
+	SummaLegend->Draw();	
+   	fCanvas->Update();
+
+/*		Rates				*/
+   	fCanvas = fRateCanvas->GetCanvas();
+   	fCanvas->cd();
+	for (j=0; j<RATELEN; j++) CommonData->hRate->SetBinContent(j+1, CommonData->fRate[(CommonData->iRatePos + j) % RATELEN]);
+	gStyle->SetOptFit(111);
+	CommonData->hRate->Fit("pol0", "Q", "p");
    	fCanvas->Update();
 
 	TThread::UnLock();
@@ -409,8 +589,45 @@ void dshowMainFrame::DrawEvent(TCanvas *cv)
 {
 	TBox PmtBox;
 	TBox SipmBox;
+	TGaxis ax;
 	int i, j, k, n;
 	int thSiPM, thPMT;
+	const struct vpos_struct {
+		double x1;
+		double y1;
+		double x2;
+		double y2;
+	} vpos[64] = {
+//		Top
+		{0.51, 0.94, 0.63, 0.96}, {0.51, 0.91, 0.63, 0.93}, {0.63, 0.94, 0.75, 0.96}, {0.63, 0.91, 0.75, 0.93}, 
+		{0.75, 0.94, 0.87, 0.96}, {0.75, 0.91, 0.87, 0.93}, {0.87, 0.94, 0.99, 0.96}, {0.87, 0.91, 0.99, 0.93}, 
+//		Reserved
+		{-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0},
+		{-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0},
+//		Outer front X, back closer to the cube
+		{0.475, 0.1, 0.48, 0.9}, {0.48, 0.1, 0.485, 0.9}, {0.485, 0.1, 0.49, 0.9},
+//		Outer front Y, back closer to the cube
+		{0.52, 0.1, 0.525, 0.9}, {0.515, 0.1, 0.52, 0.9}, {0.51, 0.1, 0.515, 0.9},
+//		Outer back X, back closer to the cube
+		{0.01, 0.1, 0.015, 0.9}, {0.015, 0.1, 0.02, 0.9}, {0.02, 0.1, 0.025, 0.9},
+//		Outer back Y, back closer to the cube
+		{0.975, 0.1, 0.98, 0.9}, {0.98, 0.1, 0.985, 0.9}, {0.985, 0.1, 0.99, 0.9},
+//		Inner front X, back closer to the cube
+		{0.455, 0.1, 0.46, 0.9}, {0.46, 0.1, 0.465, 0.9}, {0.465, 0.1, 0.47, 0.9},
+//		Inner front Y, back closer to the cube
+		{0.54, 0.1, 0.545, 0.9}, {0.535, 0.1, 0.54, 0.9}, {0.53, 0.1, 0.535, 0.9},
+//		Inner back X, back closer to the cube
+		{0.03, 0.1, 0.035, 0.9}, {0.035, 0.1, 0.04, 0.9}, {0.04, 0.1, 0.045, 0.9},
+//		Inner back Y, back closer to the cube
+		{0.955, 0.1, 0.96, 0.9}, {0.96, 0.1, 0.965, 0.9}, {0.965, 0.1, 0.97, 0.9},
+//		Reserved
+		{-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0},
+		{-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0},
+		{-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0},
+		{-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0},
+		{-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0},
+		{-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0},
+	};
 
 	if (!CommonData->EventHits) return;
 //		Draw DANSS	
@@ -423,10 +640,11 @@ void dshowMainFrame::DrawEvent(TCanvas *cv)
 	
 	for (k=0; k<2; k++) for (i=0; i<5; i++) for (j=0; j<5; j++) 
 		PmtBox.DrawBox(0.05 + 0.5*k + 0.08*i, 0.1 + 0.16*j, 0.13 + 0.5*k + 0.08*i, 0.26 +0.16*j);
-	
 	for (k=0; k<2; k++) for (i=0; i<25; i++) for (j=0; j<50; j++) 
 		SipmBox.DrawBox(0.05 + 0.5*k + 0.016*i, 0.1 + 0.008*k + 0.016*j, 0.066 + 0.5*k + 0.016*i, 0.108 + 0.008*k + 0.016*j);
-//		Draw Hits
+	for (i=0; i<64; i++) if (vpos[i].x1 >= 0) SipmBox.DrawBox(vpos[i].x1, vpos[i].y1, vpos[i].x2, vpos[i].y2);
+
+//		Draw Hits in PMT
 	thPMT = nPMTThreshold->GetIntNumber();
 	thSiPM = nSiPMThreshold->GetIntNumber();
 	PmtBox.SetLineWidth(5);
@@ -434,46 +652,59 @@ void dshowMainFrame::DrawEvent(TCanvas *cv)
 		i = CommonData->Event[n].xy;
 		j = CommonData->Event[n].z / 2;
 		k = CommonData->Event[n].z & 1;
-		PmtBox.SetLineColor(PaletteStart + CommonData->Event[n].amp/16);
+		if (!k) i = 4 - i;
+		PmtBox.SetLineColor(PaletteStart + CommonData->Event[n].amp*MAXRGB/MAXADC);
 		PmtBox.DrawBox(0.05 + 0.5*k + 0.08*i, 0.1 + 0.16*j, 0.13 + 0.5*k + 0.08*i, 0.26 +0.16*j);
 	}
-
+//		Draw Hits in SiPM
 	SipmBox.SetFillStyle(1000);
 	for (n=0; n<CommonData->EventHits; n++) if (CommonData->Event[n].type == TYPE_SIPM && CommonData->Event[n].amp > thSiPM) {
 		i = CommonData->Event[n].xy;
 		j = CommonData->Event[n].z / 2;
 		k = CommonData->Event[n].z & 1;
-		SipmBox.SetFillColor(PaletteStart + CommonData->Event[n].amp/16);
+		if (!k) i = 24 - i;
+		SipmBox.SetFillColor(PaletteStart + CommonData->Event[n].amp*MAXRGB/MAXADC);
 		SipmBox.DrawBox(0.05 + 0.5*k + 0.016*i, 0.1 + 0.008*k + 0.016*j, 0.066 + 0.5*k + 0.016*i, 0.108 + 0.008*k + 0.016*j);
 	}
+//		Draw Hits in VETO
+	for (n=0; n<CommonData->EventHits; n++) if (CommonData->Event[n].type == TYPE_VETO && CommonData->Event[n].amp > thPMT) {
+		SipmBox.SetFillColor(PaletteStart + CommonData->Event[n].amp*MAXRGB/MAXADC);
+		i = CommonData->Event[n].xy;
+		if (vpos[i].x1 < 0) continue;
+		SipmBox.DrawBox(vpos[i].x1, vpos[i].y1, vpos[i].x2, vpos[i].y2);
+	}
+//		Draw palette
+	for(i=0; i<MAXRGB; i++) {
+		SipmBox.SetFillColor(PaletteStart + i);
+		SipmBox.DrawBox(0.05 + 0.9*i/MAXRGB, 0.05, 0.05 + 0.9*(i+1)/MAXRGB, 0.09);
+	}
+
+	ax.DrawAxis(0.05, 0.05, 0.95, 0.05, 0.0, (double) MAXADC);
 
 	CommonData->EventHits = 0;
 }
 
-/*	show file open dialog to play data file			*/
+/*	show file open dialog and start thread to play to play selected data file(s)	*/
 void dshowMainFrame::PlayFileDialog(void)
 {
 	TString *cmd;
-	TObject *ptr;
-	
+
+	PlayFileStop();
 	new TGFileDialog(gClient->GetRoot(), this, kFDOpen, PlayFile);
-	
-	ptr = PlayFile->fFileNamesList->First();
-	if (ptr) {
-		cmd = new TString(myDir);
-		*cmd += "/dplay -p ";
-		*cmd += TString::Itoa(UDPPORT, 10);
-		*cmd += " -s ";
-		*cmd += TString::Itoa(nPlayBlocks->GetIntNumber(), 10);
-		for (; ptr; ptr = PlayFile->fFileNamesList->After(ptr)) {
-			*cmd += " ";
-			*cmd += ptr->GetName();			
-		}
-		*cmd += " &";
-		printf("CMD: %s\n", cmd->Data());
-		system(cmd->Data());
-		delete cmd;
+
+	if (PlayFile->fFileNamesList && PlayFile->fFileNamesList->First()) {
+		iPlayStop = 0;
+		PlayThread = new TThread("PlayThread", PlayThreadFunction, (void *) this);
+		PlayThread->Run();
 	}
+}
+
+void dshowMainFrame::PlayFileStop(void)
+{
+	iPlayStop = 1;
+	PlayProgress->SetPosition(0.0);
+	if (PlayThread) PlayThread->Join();
+	PlayThread = NULL;
 }
 
 /*	Process an event					*/
@@ -487,10 +718,19 @@ void dshowMainFrame::ProcessEvent(char *data)
 	int mod, chan;
 	int evt_len, evt_fill;
 	void *ptr;
-	int sumPMT, sumSiPM;
+	int sumPMT, sumSiPM, sumSiPMc;
+	int nSiPM, nSiPMc, nPMT, nVeto;
+	long long gTime;
+	int gTrig;
 
 	sumPMT = 0;
 	sumSiPM = 0;
+	nSiPM = 0;
+	sumSiPMc = 0;
+	nSiPMc = 0;
+	nPMT = 0;
+	nVeto = 0;
+	gTime = -1;
 
 	if (!CommonData->EventHits) {
 		evt_fill = 1;
@@ -517,16 +757,32 @@ void dshowMainFrame::ProcessEvent(char *data)
 		case TYPE_MASTER:
 			for (i = 0; i < rec->len - 2; i++) if (rec->d[i+1] & 0x4000) rec->d[i+1] |= 0x8000;
 			amp = FindMaxofShort(&rec->d[1], rec->len - 2);
-			if (Map[mod-1][chan].type == TYPE_SIPM) sumSiPM += amp;
-			if (Map[mod-1][chan].type == TYPE_PMT) sumPMT += amp;
+			t = NSPERCHAN * FindHalfTime(&rec->d[1], rec->len - 2, amp);
+			switch (Map[mod-1][chan].type) {
+			case TYPE_SIPM:
+				sumSiPM += amp;
+				nSiPM++;
+				if (amp > CommonData->SummaSiPMThreshold && t > CommonData->SummaSiPMtime[0] && t < CommonData->SummaSiPMtime[1]) {
+					sumSiPMc += amp;
+					nSiPMc++;					
+				}
+				break;
+			case TYPE_PMT:
+				sumPMT += amp;
+				nPMT++;
+				break;
+			case TYPE_VETO:
+				nVeto++;
+				break;
+			}
 			if (!CommonData->hWaveForm && rWaveTrig->IsOn() && nWFD->GetIntNumber() == mod && nChan->GetIntNumber() == chan 
 				&& amp > nWaveThreshold->GetIntNumber()) {
 				sprintf(strl, "Event WaveForm for %d.%2.2d", mod, chan);
 				CommonData->hWaveForm = new TH1D("hWave", strl, rec->len - 2, 0, NSPERCHAN * (rec->len - 2));
+				CommonData->hWaveForm->SetStats(0);
 				for (i = 0; i < rec->len - 2; i++) CommonData->hWaveForm->SetBinContent(i + 1, (double) rec->d[i+1]);
 			}
 			CommonData->hAmpE[mod-1]->Fill((double)chan, (double)amp);
-			t = NSPERCHAN * FindHalfTime(&rec->d[1], rec->len - 2, amp);
 			CommonData->hTimeA[mod-1]->Fill((double)chan, t);
 			if (amp > CommonData->TimeBThreshold) CommonData->hTimeB[mod-1]->Fill((double)chan, t);
 			if (evt_fill && Map[mod-1][chan].type >= 0) {
@@ -549,6 +805,7 @@ void dshowMainFrame::ProcessEvent(char *data)
 				&& amp > nWaveThreshold->GetIntNumber()) {
 				sprintf(strl, "Event WaveForm for %d.%2.2d", mod, chan);
 				CommonData->hWaveForm = new TH1D("hWave", strl, rec->len - 2, 0, NSPERCHAN * (rec->len - 2));
+				CommonData->hWaveForm->SetStats(0);
 				for (i = 0; i < rec->len - 2; i++) CommonData->hWaveForm->SetBinContent(i + 1, (double) rec->d[i+1]);
 			}
 			break;
@@ -559,13 +816,56 @@ void dshowMainFrame::ProcessEvent(char *data)
 				&& amp > nWaveThreshold->GetIntNumber()) {
 				sprintf(strl, "Event WaveForm for %d.%2.2d", mod, chan);
 				CommonData->hWaveForm = new TH1D("hWave", strl, rec->len - 2, 0, NSPERCHAN * (rec->len - 2));
+				CommonData->hWaveForm->SetStats(0);
 				for (i = 0; i < rec->len - 2; i++) CommonData->hWaveForm->SetBinContent(i + 1, (double) rec->d[i+1]);
 			}
 			break;
+		case TYPE_TRIG:
+			gTime = rec->d[1] + (((long long) rec->d[2]) << 15) + (((long long) rec->d[3]) << 30);
+			gTrig = rec->d[4] + (((int) rec->d[5]) << 15);
+			break;
 		}
 	}
+	if (gTime < 0) {
+		CommonData->ErrorCnt++;
+		return;
+	}
+//	check if a second passed
+	if (CommonData->gLastTime < 0) {
+		CommonData->gLastTime = gTime;
+		CommonData->gTime = gTime;
+		CommonData->gTrig = gTrig;
+	} else if (gTime - CommonData->gLastTime >= ONESECOND) {
+		CommonData->fRate[CommonData->iRatePos] = ((float) ONESECOND) * (gTrig - CommonData->gTrig) / (gTime - CommonData->gTime);
+		CommonData->iRatePos = (CommonData->iRatePos + 1) % RATELEN;
+		CommonData->gLastTime += ONESECOND;
+		CommonData->gTime = gTime;
+		CommonData->gTrig = gTrig;
+	}
+//
 	if (evt_fill && (nPMTSumThreshold->GetIntNumber() > sumPMT || nSiPMSumThreshold->GetIntNumber() > sumSiPM)) CommonData->EventHits = 0;
-
+//	TH1D *hSiPMsum[2];	// SiPM summa, all/no veto
+	CommonData->hSiPMsum[0]->Fill(sumSiPMc / SIPM2MEV);
+//	TH1D *hSiPMhits[2];	// SiPM Hits, all/no veto
+	CommonData->hSiPMhits[0]->Fill(1.0*nSiPMc);
+//	TH1D *hPMTsum[2];	// PMT summa, all/no veto
+	CommonData->hPMTsum[0]->Fill(sumPMT / PMT2MEV);
+//	TH1D *hPMThits[2];	// PMT Hits, all/no veto
+	CommonData->hPMThits[0]->Fill(1.0*nPMT);
+//	TH1D *hSPRatio[2];	// SiPM sum to PTMT sum ratio, all/no veto
+	if (sumPMT > 0) CommonData->hSPRatio[0]->Fill(sumSiPMc * PMT2MEV / (sumPMT * SIPM2MEV));
+	if (!nVeto) {
+//	TH1D *hSiPMsum[2];	// SiPM summa, all/no veto
+		CommonData->hSiPMsum[1]->Fill(sumSiPMc / SIPM2MEV);
+//	TH1D *hSiPMhits[2];	// SiPM Hits, all/no veto
+		CommonData->hSiPMhits[1]->Fill(1.0*nSiPMc);
+//	TH1D *hPMTsum[2];	// PMT summa, all/no veto
+		CommonData->hPMTsum[1]->Fill(sumPMT / PMT2MEV);
+//	TH1D *hPMThits[2];	// PMT Hits, all/no veto
+		CommonData->hPMThits[1]->Fill(1.0*nPMT);
+//	TH1D *hSPRatio[2];	// SiPM sum to PTMT sum ratio, all/no veto
+		if (sumPMT > 0) CommonData->hSPRatio[1]->Fill(sumSiPMc * PMT2MEV / (sumPMT * SIPM2MEV));
+	}
 }
 
 /*	Process SelfTrigger					*/
@@ -619,16 +919,45 @@ void dshowMainFrame::ResetTimeHists(void)
 	TThread::UnLock();
 }
 
+void dshowMainFrame::ResetSummaHists(void)
+{
+	int i;
+
+	TThread::Lock();
+	for (i=0; i<2; i++) {
+		CommonData->hSiPMsum[i]->Reset();
+		CommonData->hSiPMhits[i]->Reset();
+		CommonData->hPMTsum[i]->Reset();
+		CommonData->hPMThits[i]->Reset();
+		CommonData->hSPRatio[i]->Reset();
+	}
+	TThread::UnLock();
+}
+
 /*	Change TimeB threshold				*/
 void dshowMainFrame::ChangeTimeBThr(void)
 {
 	CommonData->TimeBThreshold = nTimeBThreshold->GetIntNumber();
 }
 
+/*	Change Summa parameters				*/
+void dshowMainFrame::ChangeSummaPars(void)
+{
+	char str[64];
+
+	CommonData->SummaSiPMThreshold = SummaSiPMThreshold->GetIntNumber();
+	CommonData->SummaSiPMtime[0] = SummaSiPMtime->GetMinPosition();
+	CommonData->SummaSiPMtime[1] = SummaSiPMtime->GetMaxPosition();
+	sprintf(str, "%5.1f", CommonData->SummaSiPMtime[0]);
+	lbSiPMtime[0]->SetTitle(str);
+	sprintf(str, "%5.1f", CommonData->SummaSiPMtime[1]);
+	lbSiPMtime[1]->SetTitle(str);
+}
+
 void dshowMainFrame::ReadConfig(const char *fname)
 {
 	config_t cnf;
-	long tmp;
+	int tmp;
 	int i, j, k, type, xy, z;
 	config_setting_t *ptr_xy;
 	config_setting_t *ptr_z;
@@ -677,6 +1006,10 @@ void dshowMainFrame::ReadConfig(const char *fname)
 			}
 			break;
 		case TYPE_VETO:
+			for (j=0; j<64; j++) {
+				Map[i][j].xy = j;
+				Map[i][j].z = 0;
+			}			
 			break;
 		}
 	}
@@ -766,6 +1099,104 @@ void *DataThreadFunction(void *ptr)
 Ret:
 	close(udpSocket);
 	if (buf) free(buf);
+	return NULL;
+}
+
+/*	Create socket for UDP write						*/
+int OpenUDP(void)
+{
+	struct sockaddr_in host;
+	int fd;
+	size_t bsize;
+	
+	fd = socket(PF_INET, SOCK_DGRAM, 0);
+	if (fd < 0) return -1;
+
+	host.sin_family = AF_INET;
+	host.sin_port = htons(UDPPORT);
+	host.sin_addr.s_addr = htonl(INADDR_ANY);
+	
+	if (connect(fd, (struct sockaddr *)&host, sizeof(host))) {
+		close(fd);
+		return -1;
+	}
+
+	bsize = BSIZE;
+	if (setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &bsize, sizeof(bsize))) {
+		close(fd);
+		return -1;
+	}
+
+	return fd;
+}
+
+/*	Data analysis thread				*/
+void *PlayThreadFunction(void *ptr)
+{
+	dshowMainFrame *Main;
+	TObject *f;
+	int fd;
+	off_t fsize;
+	off_t rsize;
+	FILE *fIn;
+	int Cnt;
+	int irc;
+	int *buf;
+	int iNum;
+
+	Main = (dshowMainFrame *)ptr;
+	f = Main->PlayFile->fFileNamesList->First();
+	fd = OpenUDP();
+	if (fd < 0) return NULL;
+	buf = (int *) malloc(BSIZE);
+	if (!buf) {
+		close(fd);
+		return NULL;
+	}
+	iNum = Main->nPlayBlocks->GetIntNumber();
+
+	for (; f; f = Main->PlayFile->fFileNamesList->After(f)) {
+		Main->PlayProgress->SetPosition(0);
+		fIn = fopen(f->GetName(), "rb");
+		if (!fIn) continue;
+		fseek(fIn, 0, SEEK_END);
+		fsize = ftello(fIn);
+		fseek(fIn, 0, SEEK_SET);
+		rsize = 0;
+		Cnt = 0;
+		Main->fStatusBar->SetText(f->GetName(), 5);
+		for(;!feof(fIn);) {
+			if (Main->iPlayStop) break;
+			irc = fread(buf, sizeof(int), 1, fIn);
+			if (irc < 0 || irc > 1) {
+				break;
+			} else if (irc == 0) {
+				continue;
+			}
+
+			if (buf[0] > BSIZE || buf[0] < 20) break;
+			irc = fread(&buf[1], buf[0] - sizeof(int), 1, fIn);
+			if (irc != 1) break;
+			write(fd, buf, buf[0]);
+			rsize += buf[0];
+			
+			Cnt++;
+			if (iNum > 0 && Cnt >= iNum) {
+				sleep(1);
+				iNum = Main->nPlayBlocks->GetIntNumber();
+				Main->PlayProgress->SetPosition(100.0*rsize/fsize);
+				Cnt = 0;
+			} else if (iNum == 0 && Cnt >= 5000) {
+				iNum = Main->nPlayBlocks->GetIntNumber();
+				Main->PlayProgress->SetPosition(100.0*rsize/fsize);
+				Cnt = 0;
+			}			
+		}
+		fclose(fIn);
+	}
+	free(buf);
+	close(fd);
+	Main->fStatusBar->SetText("", 5);
 	return NULL;
 }
 
