@@ -577,8 +577,7 @@ void dshowMainFrame::DoDraw(void)
    	fCanvas = fRateCanvas->GetCanvas();
    	fCanvas->cd();
 	for (j=0; j<RATELEN; j++) CommonData->hRate->SetBinContent(j+1, CommonData->fRate[(CommonData->iRatePos + j) % RATELEN]);
-	gStyle->SetOptFit(111);
-	CommonData->hRate->Fit("pol0", "Q", "p");
+	CommonData->hRate->Draw("p");
    	fCanvas->Update();
 
 	TThread::UnLock();
@@ -957,7 +956,7 @@ void dshowMainFrame::ChangeSummaPars(void)
 void dshowMainFrame::ReadConfig(const char *fname)
 {
 	config_t cnf;
-	int tmp;
+	long tmp;
 	int i, j, k, type, xy, z;
 	config_setting_t *ptr_xy;
 	config_setting_t *ptr_z;
@@ -1023,9 +1022,19 @@ int bind_my_socket(void)
 {
 	int fd;
 	struct sockaddr_in name;
+	size_t bsize;
+	int irc;
+	socklen_t len;
 	
 	fd = socket(PF_INET, SOCK_DGRAM, 0);
 	if (fd < 0) return fd;
+
+	bsize = BSIZE;
+	if (setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &bsize, sizeof(bsize))) {
+		close(fd);
+		return -1;
+	}
+	
 	name.sin_family = AF_INET;
 	name.sin_port = htons(UDPPORT);
 	name.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -1033,6 +1042,11 @@ int bind_my_socket(void)
 		close(fd);
 		return -1;
 	}
+	
+	len = sizeof(bsize);
+	irc = getsockopt(fd, SOL_SOCKET, SO_RCVBUF, &bsize, &len);
+	printf("Resulting buf size is %d (irc = %d, len = %d)\n", bsize, irc, len);
+	
 	return fd;
 }
 
@@ -1108,9 +1122,17 @@ int OpenUDP(void)
 	struct sockaddr_in host;
 	int fd;
 	size_t bsize;
+	int irc;
+	socklen_t len;
 	
 	fd = socket(PF_INET, SOCK_DGRAM, 0);
 	if (fd < 0) return -1;
+	
+	bsize = BSIZE;
+	if (setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &bsize, sizeof(bsize))) {
+		close(fd);
+		return -1;
+	}
 
 	host.sin_family = AF_INET;
 	host.sin_port = htons(UDPPORT);
@@ -1121,11 +1143,9 @@ int OpenUDP(void)
 		return -1;
 	}
 
-	bsize = BSIZE;
-	if (setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &bsize, sizeof(bsize))) {
-		close(fd);
-		return -1;
-	}
+	len = sizeof(bsize);
+	irc = getsockopt(fd, SOL_SOCKET, SO_SNDBUF, &bsize, &len);
+	printf("Resulting buf size is %d (irc = %d, len = %d)\n", bsize, irc, len);
 
 	return fd;
 }
@@ -1140,10 +1160,13 @@ void *PlayThreadFunction(void *ptr)
 	off_t rsize;
 	FILE *fIn;
 	int Cnt;
+	long long lCnt;
 	int irc;
 	int *buf;
 	int iNum;
+	char str[256];
 
+	lCnt = 0;
 	Main = (dshowMainFrame *)ptr;
 	f = Main->PlayFile->fFileNamesList->First();
 	fd = OpenUDP();
@@ -1164,7 +1187,6 @@ void *PlayThreadFunction(void *ptr)
 		fseek(fIn, 0, SEEK_SET);
 		rsize = 0;
 		Cnt = 0;
-		Main->fStatusBar->SetText(f->GetName(), 5);
 		for(;!feof(fIn);) {
 			if (Main->iPlayStop) break;
 			irc = fread(buf, sizeof(int), 1, fIn);
@@ -1177,18 +1199,18 @@ void *PlayThreadFunction(void *ptr)
 			if (buf[0] > BSIZE || buf[0] < 20) break;
 			irc = fread(&buf[1], buf[0] - sizeof(int), 1, fIn);
 			if (irc != 1) break;
-			write(fd, buf, buf[0]);
+			irc = write(fd, buf, buf[0]);
+			if (irc != buf[0]) printf("Write %d bytes resulted in irc = %d: %m\n", buf[0], irc);
 			rsize += buf[0];
 			
 			Cnt++;
-			if (iNum > 0 && Cnt >= iNum) {
-				sleep(1);
+			lCnt++;
+			if ((iNum > 0 && Cnt >= iNum) || (iNum == 0 && Cnt >= 5000)) {
+				if (iNum > 0) sleep(1);
 				iNum = Main->nPlayBlocks->GetIntNumber();
 				Main->PlayProgress->SetPosition(100.0*rsize/fsize);
-				Cnt = 0;
-			} else if (iNum == 0 && Cnt >= 5000) {
-				iNum = Main->nPlayBlocks->GetIntNumber();
-				Main->PlayProgress->SetPosition(100.0*rsize/fsize);
+				sprintf(str, "%s   %Ld", f->GetName(), lCnt);
+				Main->fStatusBar->SetText(str, 5);
 				Cnt = 0;
 			}			
 		}
@@ -1196,7 +1218,8 @@ void *PlayThreadFunction(void *ptr)
 	}
 	free(buf);
 	close(fd);
-	Main->fStatusBar->SetText("", 5);
+	sprintf(str, "%Ld blocks sent", lCnt);
+	Main->fStatusBar->SetText(str, 5);
 	return NULL;
 }
 
