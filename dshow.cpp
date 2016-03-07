@@ -58,7 +58,6 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h) : TGMainFr
 	// Create our data structures and histogramms
 	CommonData = (struct common_data_struct *) malloc(sizeof(struct common_data_struct));
 	memset(CommonData, 0, sizeof(struct common_data_struct));
-	PlayThread = NULL;
 
 	gStyle->SetOptStat("e");
 	gStyle->SetOptFit(111);
@@ -205,8 +204,7 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h) : TGMainFr
    	MapWindow();
 
 	// Start thread and Timer
-	DataThread = new TThread("DataThread", DataThreadFunction, (void *) this);
-	DataThread->Run();
+	DataThread = NULL;
 	TimerCnt = 0;
 	OneSecond = new TTimer(1000);
 	OneSecond->Connect("Timeout()", "dshowMainFrame", this, "OnTimer()");
@@ -217,10 +215,8 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h) : TGMainFr
 dshowMainFrame::~dshowMainFrame(void) 
 {
 	CommonData->iStop = 1;
-	iPlayStop = 1;
 	delete OneSecond;
-	DataThread->Join();
-	if (PlayThread) PlayThread->Join();
+	if (DataThread) DataThread->Join();
 	Cleanup();
 //		all memory will be freed without us anyway...
 }
@@ -692,18 +688,18 @@ void dshowMainFrame::PlayFileDialog(void)
 	new TGFileDialog(gClient->GetRoot(), this, kFDOpen, PlayFile);
 
 	if (PlayFile->fFileNamesList && PlayFile->fFileNamesList->First()) {
-		iPlayStop = 0;
-		PlayThread = new TThread("PlayThread", PlayThreadFunction, (void *) this);
-		PlayThread->Run();
+		CommonData->iStop = 0;
+		DataThread = new TThread("DataThread", DataThreadFunction, (void *) this);
+		DataThread->Run();
 	}
 }
 
 void dshowMainFrame::PlayFileStop(void)
 {
-	iPlayStop = 1;
+	CommonData->iStop = 1;
 	PlayProgress->SetPosition(0.0);
-	if (PlayThread) PlayThread->Join();
-	PlayThread = NULL;
+	if (DataThread) DataThread->Join();
+	DataThread = NULL;
 }
 
 /*	Process an event					*/
@@ -1016,55 +1012,26 @@ void dshowMainFrame::ReadConfig(const char *fname)
 	config_destroy(&cnf);
 }
 
-/*	General functions				*/
-/*	Create receiving udp socket			*/
-int bind_my_socket(void)
-{
-	int fd;
-	struct sockaddr_in name;
-	size_t bsize;
-	int irc;
-	socklen_t len;
-	
-	fd = socket(PF_INET, SOCK_DGRAM, 0);
-	if (fd < 0) return fd;
-
-	bsize = BSIZE;
-	if (setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &bsize, sizeof(bsize))) {
-		close(fd);
-		return -1;
-	}
-	
-	name.sin_family = AF_INET;
-	name.sin_port = htons(UDPPORT);
-	name.sin_addr.s_addr = htonl(INADDR_ANY);
-	if (bind(fd, (struct sockaddr *)&name, sizeof(name)) < 0) {
-		close(fd);
-		return -1;
-	}
-	
-	len = sizeof(bsize);
-	irc = getsockopt(fd, SOL_SOCKET, SO_RCVBUF, &bsize, &len);
-	printf("Resulting buf size is %d (irc = %d, len = %d)\n", bsize, irc, len);
-	
-	return fd;
-}
-
 /*	Data analysis thread				*/
 void *DataThreadFunction(void *ptr)
 {
 	struct common_data_struct *CommonData;
 	dshowMainFrame *Main;
-	int udpSocket;
 	char *buf;
 	struct rec_header_struct *head;
 	int irc;
 	int mod, chan;
-	fd_set set;
 	struct timeval tm;
+	FILE *fIn;
+	off_t fsize;
+	off_t rsize;
+	int iNum;
+	int Cnt;
+	TObject *f;
 	
 	Main = (dshowMainFrame *)ptr;
 	CommonData = Main->CommonData;
+	CommonData->iError = 0;
 	
 	buf = (char *)malloc(BSIZE);
 	if (!buf) {
@@ -1072,23 +1039,63 @@ void *DataThreadFunction(void *ptr)
 		goto Ret;
 	}
 	head = (struct rec_header_struct *) buf;
-
-	udpSocket = bind_my_socket();
-	if (udpSocket < 0) {
-		CommonData->iError = 20;
+	
+	f = Main->PlayFile->fFileNamesList->First();
+	iNum = Main->nPlayBlocks->GetIntNumber();
+	Main->fStatusBar->SetText(f->GetName(), 5);
+	Main->PlayProgress->SetPosition(0);
+	fIn = fopen(f->GetName(), "rb");
+	if (!fIn) {
+		CommonData->iError = 15;
 		goto Ret;
-	}	
-
+	}
+	fseek(fIn, 0, SEEK_END);
+	fsize = ftello(fIn);
+	fseek(fIn, 0, SEEK_SET);
+	rsize = 0;
+	Cnt = 0;
+	
 	while (!CommonData->iStop) {
-		tm.tv_sec = 0;		// 0.1 s
-		tm.tv_usec = 100000;
-		FD_ZERO(&set);
-		FD_SET(udpSocket, &set);
-		irc = select(FD_SETSIZE, &set, NULL, NULL, &tm);
-		if (irc <= 0 || !FD_ISSET(udpSocket, &set)) continue;
-		irc = read(udpSocket, buf, BSIZE);
+		irc = fread(buf, sizeof(int), 1, fIn);
+		if (irc < 0 || irc > 1) {
+			CommonData->iError = 20;
+			break;
+		} else if (irc == 0) {
+			//	check if we have file after
+			if (Main->PlayFile->fFileNamesList->After(f)) {
+				f = Main->PlayFile->fFileNamesList->After(f);
+				Main->fStatusBar->SetText(f->GetName(), 5);
+				Main->PlayProgress->SetPosition(0);
+				fIn = fopen(f->GetName(), "rb");
+				if (!fIn) {
+					CommonData->iError = 25;
+					goto Ret;
+				}
+				fseek(fIn, 0, SEEK_END);
+				fsize = ftello(fIn);
+				fseek(fIn, 0, SEEK_SET);
+				rsize = 0;
+				Cnt = 0;
+			} else {
+				tm.tv_sec = 0;		// 0.1 s
+				tm.tv_usec = 100000;
+				select(FD_SETSIZE, NULL, NULL, NULL, &tm);
+			}
+			continue;
+		}
+
+		if (head->len > BSIZE || head->len < sizeof(int)) {
+			CommonData->iError = 30;
+			break;
+		}
+		irc = fread(&buf[sizeof(int)], head->len - sizeof(int), 1, fIn);
+		if (irc != 1) {
+			CommonData->iError = 40;
+			break;
+		}
+		
 		TThread::Lock();
-		if (irc >= sizeof(struct rec_header_struct) && (head->len == irc)) {
+		if (head->len >= sizeof(struct rec_header_struct)) {
 			CommonData->BlockCnt++;
 			if (head->type & REC_EVENT) {
 				Main->ProcessEvent(buf);
@@ -1109,117 +1116,19 @@ void *DataThreadFunction(void *ptr)
 			CommonData->ErrorCnt++;
 		}
 		TThread::UnLock();
+		
+		Cnt++;
+		if ((iNum > 0 && Cnt >= iNum) || (iNum == 0 && Cnt >= 20000)) {
+			if (iNum > 0) sleep(1);
+			iNum = Main->nPlayBlocks->GetIntNumber();
+			if (fsize) Main->PlayProgress->SetPosition(100.0*rsize/fsize);
+			Main->fStatusBar->SetText(f->GetName(), 5);
+			Cnt = 0;
+		}	
 	}
 Ret:
-	close(udpSocket);
+	Main->fStatusBar->SetText("", 5);
 	if (buf) free(buf);
-	return NULL;
-}
-
-/*	Create socket for UDP write						*/
-int OpenUDP(void)
-{
-	struct sockaddr_in host;
-	int fd;
-	size_t bsize;
-	int irc;
-	socklen_t len;
-	
-	fd = socket(PF_INET, SOCK_DGRAM, 0);
-	if (fd < 0) return -1;
-	
-	bsize = BSIZE;
-	if (setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &bsize, sizeof(bsize))) {
-		close(fd);
-		return -1;
-	}
-
-	host.sin_family = AF_INET;
-	host.sin_port = htons(UDPPORT);
-	host.sin_addr.s_addr = htonl(INADDR_ANY);
-	
-	if (connect(fd, (struct sockaddr *)&host, sizeof(host))) {
-		close(fd);
-		return -1;
-	}
-
-	len = sizeof(bsize);
-	irc = getsockopt(fd, SOL_SOCKET, SO_SNDBUF, &bsize, &len);
-	printf("Resulting buf size is %d (irc = %d, len = %d)\n", bsize, irc, len);
-
-	return fd;
-}
-
-/*	Data analysis thread				*/
-void *PlayThreadFunction(void *ptr)
-{
-	dshowMainFrame *Main;
-	TObject *f;
-	int fd;
-	off_t fsize;
-	off_t rsize;
-	FILE *fIn;
-	int Cnt;
-	long long lCnt;
-	int irc;
-	int *buf;
-	int iNum;
-	char str[256];
-
-	lCnt = 0;
-	Main = (dshowMainFrame *)ptr;
-	f = Main->PlayFile->fFileNamesList->First();
-	fd = OpenUDP();
-	if (fd < 0) return NULL;
-	buf = (int *) malloc(BSIZE);
-	if (!buf) {
-		close(fd);
-		return NULL;
-	}
-	iNum = Main->nPlayBlocks->GetIntNumber();
-
-	for (; f; f = Main->PlayFile->fFileNamesList->After(f)) {
-		Main->PlayProgress->SetPosition(0);
-		fIn = fopen(f->GetName(), "rb");
-		if (!fIn) continue;
-		fseek(fIn, 0, SEEK_END);
-		fsize = ftello(fIn);
-		fseek(fIn, 0, SEEK_SET);
-		rsize = 0;
-		Cnt = 0;
-		for(;!feof(fIn);) {
-			if (Main->iPlayStop) break;
-			irc = fread(buf, sizeof(int), 1, fIn);
-			if (irc < 0 || irc > 1) {
-				break;
-			} else if (irc == 0) {
-				continue;
-			}
-
-			if (buf[0] > BSIZE || buf[0] < 20) break;
-			irc = fread(&buf[1], buf[0] - sizeof(int), 1, fIn);
-			if (irc != 1) break;
-			irc = write(fd, buf, buf[0]);
-			if (irc != buf[0]) printf("Write %d bytes resulted in irc = %d: %m\n", buf[0], irc);
-			rsize += buf[0];
-			
-			Cnt++;
-			lCnt++;
-			if ((iNum > 0 && Cnt >= iNum) || (iNum == 0 && Cnt >= 5000)) {
-				if (iNum > 0) sleep(1);
-				iNum = Main->nPlayBlocks->GetIntNumber();
-				Main->PlayProgress->SetPosition(100.0*rsize/fsize);
-				sprintf(str, "%s   %Ld", f->GetName(), lCnt);
-				Main->fStatusBar->SetText(str, 5);
-				Cnt = 0;
-			}			
-		}
-		fclose(fIn);
-	}
-	free(buf);
-	close(fd);
-	sprintf(str, "%Ld blocks sent", lCnt);
-	Main->fStatusBar->SetText(str, 5);
 	return NULL;
 }
 

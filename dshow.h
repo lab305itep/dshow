@@ -85,15 +85,12 @@ struct channel_struct {
 };
 
 void *DataThreadFunction(void *ptr);
-void *PlayThreadFunction(void *ptr);
 
 class dshowMainFrame : public TGMainFrame {
 private:
 	struct common_data_struct *CommonData;
 	struct channel_struct Map[MAXWFD][64];	
 	TThread *DataThread;
-	TThread *PlayThread;
-	int iPlayStop;
 	TGStatusBar *fStatusBar;
 	TTimer *OneSecond;
 //		WaveForm tab
@@ -171,7 +168,6 @@ public:
 	void PlayFileStop(void);
 	void ReadConfig(const char *fname);
 	friend void *DataThreadFunction(void *ptr);
-	friend void *PlayThreadFunction(void *ptr);
 	ClassDef(dshowMainFrame, 0)
 };
 
