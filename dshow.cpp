@@ -21,6 +21,7 @@
 #include <TGraph.h>
 #include <TH2D.h>
 #include <TLegend.h>
+#include <TROOT.h>
 #include <TRootEmbeddedCanvas.h>
 #include <TString.h>
 #include <TStyle.h>
@@ -58,9 +59,11 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h) : TGMainFr
 	// Create our data structures and histogramms
 	CommonData = (struct common_data_struct *) malloc(sizeof(struct common_data_struct));
 	memset(CommonData, 0, sizeof(struct common_data_struct));
+	Event = NULL;
+	EventLength = 0;
 
+	gROOT->SetStyle("Plain");
 	gStyle->SetOptStat("e");
-	gStyle->SetOptFit(111);
 	for(i=0; i<MAXWFD; i++) {
 		snprintf(strs, sizeof(strs), "hAmpS%2.2d", i+1);
 		snprintf(strl, sizeof(strl), "Module %2.2d: amplitude versus channels number (self)", i+1);		
@@ -75,11 +78,15 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h) : TGMainFr
 		snprintf(strl, sizeof(strl), "Module %2.2d: time versus channels number, amplitude above threshold", i+1);
 		CommonData->hTimeB[i] = new TH2D(strs, strl, 64, 0, 64, 100, 0, 800);
 		CommonData->hTimeB[i]->SetLineColor(kBlue);
+		snprintf(strs, sizeof(strs), "hTimeC%2.2d", i+1);
+		snprintf(strl, sizeof(strl), "Module %2.2d: time versus channels number relative to common SiPM time, amplitude above threshold", i+1);
+		CommonData->hTimeC[i] = new TH2D(strs, strl, 64, 0, 64, 50, -200, 200);
 	}
 //	TLegend
-	TimeLegend = new TLegend(0.76, 0.8, 0.97, 0.88);
+	TimeLegend = new TLegend(0.65, 0.8, 0.99, 0.89);
 	TimeLegend->AddEntry(CommonData->hTimeA[0], "All events", "L");
 	TimeLegend->AddEntry(CommonData->hTimeB[0], "Amplitude above threshold", "L");
+	TimeLegend->SetFillColor(kWhite);
 
 //	TH1D *hSiPMsum[2];	// SiPM summa, all/no veto
 	CommonData->hSiPMsum[0] = new TH1D("hSiPMsum0", "Sum of all SiPM counts, MeV", 200, 0, 10.0);
@@ -105,6 +112,7 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h) : TGMainFr
 	SummaLegend = new TLegend(0.6, 0.1, 0.9, 0.3);
 	SummaLegend->AddEntry(CommonData->hSiPMsum[0], "All events", "L");
 	SummaLegend->AddEntry(CommonData->hSiPMsum[1], "NO veto", "L");
+	SummaLegend->SetFillColor(kWhite);
 
 //	Rate
 	CommonData->hRate = new TH1D("hRate", "Trigger rate, Hz", RATELEN, 0, RATELEN);
@@ -519,6 +527,9 @@ void dshowMainFrame::DoDraw(void)
 /*		Times				*/
    	fCanvas = fTimeCanvas->GetCanvas();
    	fCanvas->cd();
+	fCanvas->Clear();
+	fCanvas->Divide(2, 1);
+   	fCanvas->cd(1);
 	if (rTimeAll->IsOn()) {
 		sprintf(str, "Module: %d. Time distribution for all channels.", mod + 1);
 		CommonData->hTimeA[mod]->ProjectionY()->SetTitle(str);
@@ -531,6 +542,16 @@ void dshowMainFrame::DoDraw(void)
 		CommonData->hTimeB[mod]->ProjectionY("_py", chan + 1, chan + 1)->Draw("same");
 	}
 	TimeLegend->Draw();
+   	fCanvas->cd(2);
+	if (rTimeAll->IsOn()) {
+		sprintf(str, "Module: %d. Time versus common SiPM time for all channels.", mod + 1);
+		CommonData->hTimeC[mod]->ProjectionY()->SetTitle(str);
+		CommonData->hTimeC[mod]->ProjectionY()->Draw();
+	} else if (rTimeSingle->IsOn()) {
+		sprintf(str, "Module: %d. Time versus common SiPM time for channel %d.", mod + 1, chan);
+		CommonData->hTimeC[mod]->ProjectionY("_py", chan + 1, chan + 1)->SetTitle(str);
+		CommonData->hTimeC[mod]->ProjectionY("_py", chan + 1, chan + 1)->Draw();
+	}
    	fCanvas->Update();
 
 /*		Event display			*/
@@ -707,16 +728,19 @@ void dshowMainFrame::ProcessEvent(char *data)
 {
 	struct hw_rec_struct *rec;
 	struct rec_header_struct *head;
-	int i, iptr, len, amp;
-	double t;
+	int i, iptr, len;
+	int amp;
+	float t, at;
+	int nat;
 	char strl[1024];
 	int mod, chan;
-	int evt_len, evt_fill;
+	int evt_len;
 	void *ptr;
 	int sumPMT, sumSiPM, sumSiPMc;
 	int nSiPM, nSiPMc, nPMT, nVeto;
 	long long gTime;
 	int gTrig;
+	int nHits;
 
 	sumPMT = 0;
 	sumSiPM = 0;
@@ -726,12 +750,7 @@ void dshowMainFrame::ProcessEvent(char *data)
 	nPMT = 0;
 	nVeto = 0;
 	gTime = -1;
-
-	if (!CommonData->EventHits) {
-		evt_fill = 1;
-	} else {
-		evt_fill = 0;
-	}
+	nHits = 0;
 
 	head = (struct rec_header_struct *)data;
 	for (iptr = sizeof(struct rec_header_struct); iptr < head->len; iptr += len) {
@@ -780,18 +799,21 @@ void dshowMainFrame::ProcessEvent(char *data)
 			CommonData->hAmpE[mod-1]->Fill((double)chan, (double)amp);
 			CommonData->hTimeA[mod-1]->Fill((double)chan, t);
 			if (amp > CommonData->TimeBThreshold) CommonData->hTimeB[mod-1]->Fill((double)chan, t);
-			if (evt_fill && Map[mod-1][chan].type >= 0) {
-				if (CommonData->EventHits >= CommonData->EventLength) {
-					ptr = realloc(CommonData->Event, (CommonData->EventLength + 1024) * sizeof(struct evt_disp_struct));
+			if (Map[mod-1][chan].type >= 0) {
+				if (nHits >= EventLength) {
+					ptr = realloc(Event, (EventLength + 1024) * sizeof(struct evt_disp_struct));
 					if (!ptr) break;
-					CommonData->Event = (struct evt_disp_struct *)ptr;
-					CommonData->EventLength += 1024;
+					Event = (struct evt_disp_struct *)ptr;
+					EventLength += 1024;
 				}
-				CommonData->Event[CommonData->EventHits].amp = amp;
-				CommonData->Event[CommonData->EventHits].type = Map[mod-1][chan].type;
-				CommonData->Event[CommonData->EventHits].xy = Map[mod-1][chan].xy;
-				CommonData->Event[CommonData->EventHits].z = Map[mod-1][chan].z;
-				CommonData->EventHits++;
+				Event[nHits].mod = mod;
+				Event[nHits].chan = chan;
+				Event[nHits].amp = amp;
+				Event[nHits].time = t;
+				Event[nHits].type = Map[mod-1][chan].type;
+				Event[nHits].xy = Map[mod-1][chan].xy;
+				Event[nHits].z = Map[mod-1][chan].z;
+				nHits++;
 			}
 			break;
 		case TYPE_RAW:
@@ -838,7 +860,31 @@ void dshowMainFrame::ProcessEvent(char *data)
 		CommonData->gTrig = gTrig;
 	}
 //
-	if (evt_fill && (nPMTSumThreshold->GetIntNumber() > sumPMT || nSiPMSumThreshold->GetIntNumber() > sumSiPM)) CommonData->EventHits = 0;
+	if ((!CommonData->EventHits) && sumPMT >= nPMTSumThreshold->GetIntNumber() && sumSiPM >= nSiPMSumThreshold->GetIntNumber()) {
+		if (nHits > CommonData->EventLength) {
+			ptr = realloc(CommonData->Event, nHits * sizeof(struct evt_disp_struct));
+			if (ptr) {
+				CommonData->Event = (struct evt_disp_struct *) ptr;
+				memcpy(CommonData->Event, Event, nHits * sizeof(struct evt_disp_struct));
+				CommonData->EventLength = nHits;
+				CommonData->EventHits = nHits;
+			}
+		} else {
+			memcpy(CommonData->Event, Event, nHits * sizeof(struct evt_disp_struct));
+			CommonData->EventHits = nHits;
+		}
+	}
+//		TimeC
+	nat = 0;
+	at = 0;
+	for (i = 0; i<nHits; i++) if (Event[i].amp > CommonData->TimeBThreshold && Event[i].type == TYPE_SIPM) {
+		at += Event[i].time;
+		nat++;
+	}
+	if (nat) {
+		at /= nat;
+		for (i = 0; i<nHits; i++) if (Event[i].amp > CommonData->TimeBThreshold) CommonData->hTimeC[Event[i].mod - 1]->Fill((double) Event[i].chan, Event[i].time - at);
+	}
 //	TH1D *hSiPMsum[2];	// SiPM summa, all/no veto
 	CommonData->hSiPMsum[0]->Fill(sumSiPMc / SIPM2MEV);
 //	TH1D *hSiPMhits[2];	// SiPM Hits, all/no veto
@@ -1093,6 +1139,7 @@ void *DataThreadFunction(void *ptr)
 			CommonData->iError = 40;
 			break;
 		}
+		rsize += head->len;
 		
 		TThread::Lock();
 		if (head->len >= sizeof(struct rec_header_struct)) {

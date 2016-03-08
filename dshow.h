@@ -35,10 +35,13 @@ class TTimer;
 struct hw_rec_struct_self;
 
 struct evt_disp_struct {
-	int amp;
+	float amp;
+	float time;
+	short int mod;
 	char type;
 	char xy;
 	char z;
+	char chan;
 };
 
 struct common_data_struct {
@@ -54,6 +57,7 @@ struct common_data_struct {
 	TH2D *hAmpE[MAXWFD];	// amplitude versus channel - events
 	TH2D *hTimeA[MAXWFD];	// time versus channel - events, no threshold
 	TH2D *hTimeB[MAXWFD];	// time versus channel - events, with fixed threshold
+	TH2D *hTimeC[MAXWFD];	// channel time - common SiPM time, TimeB thresholds
 	int TimeBThreshold;	// amplitude threshold for TimeB histogram
 	TH1D *hSiPMsum[2];	// SiPM summa, all/no veto
 	TH1D *hSiPMhits[2];	// SiPM Hits, all/no veto
@@ -71,7 +75,7 @@ struct common_data_struct {
 //
 	int EventHits;		// hits in event to display ready signature when not zero
 	int EventLength;	// number of hits allocated
-	struct evt_disp_struct *Event;	// allocated by analysis
+	struct evt_disp_struct *Event;	// allocated by analysis for display
 };
 
 #define TYPE_SIPM	0
@@ -89,7 +93,10 @@ void *DataThreadFunction(void *ptr);
 class dshowMainFrame : public TGMainFrame {
 private:
 	struct common_data_struct *CommonData;
-	struct channel_struct Map[MAXWFD][64];	
+	struct channel_struct Map[MAXWFD][64];
+	struct evt_disp_struct *Event;	// event under analysis
+	int EventLength;		// allocated area in hits
+	
 	TThread *DataThread;
 	TGStatusBar *fStatusBar;
 	TTimer *OneSecond;
