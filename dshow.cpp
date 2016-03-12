@@ -3,13 +3,14 @@
 
 #define _FILE_OFFSET_BITS 64
 #include <TApplication.h>
-#include <TGClient.h>
+#include <TBox.h>
 #include <TCanvas.h>
 #include <TColor.h>
+#include <TF1.h>
 #include <TGaxis.h>
-#include <TBox.h>
 #include <TGButton.h>
 #include <TGButtonGroup.h>
+#include <TGClient.h>
 #include <TGComboBox.h>
 #include <TGFileDialog.h>
 #include <TGLabel.h>
@@ -21,14 +22,17 @@
 #include <TGraph.h>
 #include <TH2D.h>
 #include <TLegend.h>
+#include <TLine.h>
 #include <TROOT.h>
 #include <TRootEmbeddedCanvas.h>
 #include <TString.h>
 #include <TStyle.h>
 #include <TSystem.h>
+#include <TText.h>
 #include <TThread.h>
 #include <arpa/inet.h>
 #include <libconfig.h>
+#include <math.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <stdio.h>
@@ -61,9 +65,12 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h) : TGMainFr
 	memset(CommonData, 0, sizeof(struct common_data_struct));
 	Event = NULL;
 	EventLength = 0;
+	CleanEvent = NULL;
+	CleanLength = 0;
 
 	gROOT->SetStyle("Plain");
 	gStyle->SetOptStat("e");
+	gStyle->SetOptFit(11);
 	for(i=0; i<MAXWFD; i++) {
 		snprintf(strs, sizeof(strs), "hAmpS%2.2d", i+1);
 		snprintf(strl, sizeof(strl), "Module %2.2d: amplitude versus channels number (self)", i+1);		
@@ -80,7 +87,7 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h) : TGMainFr
 		CommonData->hTimeB[i]->SetLineColor(kBlue);
 		snprintf(strs, sizeof(strs), "hTimeC%2.2d", i+1);
 		snprintf(strl, sizeof(strl), "Module %2.2d: time versus channels number relative to common SiPM time, amplitude above threshold", i+1);
-		CommonData->hTimeC[i] = new TH2D(strs, strl, 64, 0, 64, 50, -200, 200);
+		CommonData->hTimeC[i] = new TH2D(strs, strl, 64, 0, 64, 400, -200, 200);
 	}
 //	TLegend
 	TimeLegend = new TLegend(0.65, 0.8, 0.99, 0.89);
@@ -115,7 +122,7 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h) : TGMainFr
 	SummaLegend->SetFillColor(kWhite);
 
 //	Rate
-	CommonData->hRate = new TH1D("hRate", "Trigger rate, Hz", RATELEN, 0, RATELEN);
+	CommonData->hRate = new TH1D("hRate", "Trigger rate, Hz;s", RATELEN, -5 * RATELEN, 0);
 	CommonData->hRate->SetStats(0);
 	CommonData->hRate->SetMarkerStyle(20);
 	CommonData->hRate->SetMarkerColor(kBlue);
@@ -331,8 +338,16 @@ void dshowMainFrame::CreateTimeTab(TGTab *tab)
 	nTimeBThreshold = new TGNumberEntry(hframe, 0, 5, -1, TGNumberFormat::kNESInteger, TGNumberFormat::kNEANonNegative);
 	CommonData->TimeBThreshold = 100;
 	nTimeBThreshold->SetIntNumber(CommonData->TimeBThreshold);
-	nTimeBThreshold->Connect("ValueChanged(Long_t)", "dshowMainFrame", this, "ChangeTimeBThr()");
+	nTimeBThreshold->Connect("ValueSet(Long_t)", "dshowMainFrame", this, "ChangeTimeBThr()");
    	hframe->AddFrame(nTimeBThreshold, new TGLayoutHints(kLHintsLeft  | kLHintsCenterY, 5, 5, 3, 4));
+
+	lb = new TGLabel(hframe, "SiPM +- Time window, ns:");
+   	hframe->AddFrame(lb, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 15, 5, 3, 4));
+	nSiPMWindow = new TGNumberEntry(hframe, 0, 5, -1, TGNumberFormat::kNESRealTwo, TGNumberFormat::kNEANonNegative);
+	CommonData->SiPMWindow = 10;	// ns
+	nSiPMWindow->SetNumber(CommonData->SiPMWindow);
+	nSiPMWindow->Connect("ValueSet(Long_t)", "dshowMainFrame", this, "ChangeSummaPars()");
+   	hframe->AddFrame(nSiPMWindow, new TGLayoutHints(kLHintsLeft  | kLHintsCenterY, 5, 5, 3, 4));
 
    	TGTextButton *reset = new TGTextButton(hframe,"&Reset");
 	reset->Connect("Clicked()", "dshowMainFrame", this, "ResetTimeHists()");
@@ -397,22 +412,8 @@ void dshowMainFrame::CreateSummaTab(TGTab *tab)
 	SummaSiPMThreshold = new TGNumberEntry(hframe, 0, 5, -1, TGNumberFormat::kNESInteger, TGNumberFormat::kNEANonNegative);
 	CommonData->SummaSiPMThreshold = 30;
 	SummaSiPMThreshold->SetIntNumber(CommonData->SummaSiPMThreshold);
-	SummaSiPMThreshold->Connect("ValueChanged(Long_t)", "dshowMainFrame", this, "ChangeSummaPars()");
+	SummaSiPMThreshold->Connect("ValueSet(Long_t)", "dshowMainFrame", this, "ChangeSummaPars()");
    	hframe->AddFrame(SummaSiPMThreshold, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));
-
-	lb = new TGLabel(hframe, "SiPM Time range, ns:");
-   	hframe->AddFrame(lb, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 15, 5, 3, 4));
-	lbSiPMtime[0] = new TGLabel(hframe, "160.0");
-   	hframe->AddFrame(lbSiPMtime[0], new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));
-	SummaSiPMtime = new TGDoubleHSlider(hframe, 200, kDoubleScaleNo);
-	SummaSiPMtime->SetRange(0, 500);
-	CommonData->SummaSiPMtime[0] = 160.0;
-	CommonData->SummaSiPMtime[1] = 240.0;
-	SummaSiPMtime->SetPosition(CommonData->SummaSiPMtime[0], CommonData->SummaSiPMtime[1]);
-	SummaSiPMtime->Connect("PositionChanged()", "dshowMainFrame", this, "ChangeSummaPars()");
-   	hframe->AddFrame(SummaSiPMtime, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));
-	lbSiPMtime[1] = new TGLabel(hframe, "240.0");
-   	hframe->AddFrame(lbSiPMtime[1], new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));
 
    	TGTextButton *reset = new TGTextButton(hframe,"&Reset");
 	reset->Connect("Clicked()", "dshowMainFrame", this, "ResetSummaHists()");
@@ -446,8 +447,12 @@ void dshowMainFrame::DoDraw(void)
 {
 	char str[1024];
    	TCanvas *fCanvas;
+   	TText txt;
+   	TLine ln;
 	int mod, chan;
 	int i, j;
+	double h;
+	TH1D *hProj;
 
 	mod = nWFD->GetIntNumber() - 1;
 	chan = nChan->GetIntNumber();
@@ -545,12 +550,23 @@ void dshowMainFrame::DoDraw(void)
    	fCanvas->cd(2);
 	if (rTimeAll->IsOn()) {
 		sprintf(str, "Module: %d. Time versus common SiPM time for all channels.", mod + 1);
-		CommonData->hTimeC[mod]->ProjectionY()->SetTitle(str);
-		CommonData->hTimeC[mod]->ProjectionY()->Draw();
+		hProj = CommonData->hTimeC[mod]->ProjectionY();
 	} else if (rTimeSingle->IsOn()) {
 		sprintf(str, "Module: %d. Time versus common SiPM time for channel %d.", mod + 1, chan);
-		CommonData->hTimeC[mod]->ProjectionY("_py", chan + 1, chan + 1)->SetTitle(str);
-		CommonData->hTimeC[mod]->ProjectionY("_py", chan + 1, chan + 1)->Draw();
+		hProj = CommonData->hTimeC[mod]->ProjectionY("_py", chan + 1, chan + 1);
+	}
+	hProj->SetTitle(str);
+	if (hProj->Integral() > 1.0) {
+		hProj->Fit("gaus", "Q");
+	} else {
+		hProj->Draw();
+	}
+	h = hProj->GetMaximum() / 2;
+	if (Map[mod][0].type == TYPE_SIPM) {
+		ln.SetLineColor(kRed);
+		ln.SetLineWidth(2);
+		ln.DrawLine(-CommonData->SiPMWindow, 0, -CommonData->SiPMWindow, h);
+		ln.DrawLine( CommonData->SiPMWindow, 0,  CommonData->SiPMWindow, h);
 	}
    	fCanvas->Update();
 
@@ -594,7 +610,13 @@ void dshowMainFrame::DoDraw(void)
    	fCanvas = fRateCanvas->GetCanvas();
    	fCanvas->cd();
 	for (j=0; j<RATELEN; j++) CommonData->hRate->SetBinContent(j+1, CommonData->fRate[(CommonData->iRatePos + j) % RATELEN]);
-	CommonData->hRate->Draw("p");
+   	if (CommonData->hRate->Integral() > 1) {
+		CommonData->hRate->Fit("pol0", "Q", "p");
+		sprintf(str, "%6.1f Hz", CommonData->hRate->GetFunction("pol0")->GetParameter(0));
+		txt.DrawTextNDC(0.75, 0.91, str);
+	} else {
+		CommonData->hRate->Draw("p");
+	}
    	fCanvas->Update();
 
 	TThread::UnLock();
@@ -741,6 +763,7 @@ void dshowMainFrame::ProcessEvent(char *data)
 	long long gTime;
 	int gTrig;
 	int nHits;
+	int cHits;
 
 	sumPMT = 0;
 	sumSiPM = 0;
@@ -751,6 +774,7 @@ void dshowMainFrame::ProcessEvent(char *data)
 	nVeto = 0;
 	gTime = -1;
 	nHits = 0;
+	cHits = 0;
 
 	head = (struct rec_header_struct *)data;
 	for (iptr = sizeof(struct rec_header_struct); iptr < head->len; iptr += len) {
@@ -771,24 +795,7 @@ void dshowMainFrame::ProcessEvent(char *data)
 		case TYPE_MASTER:
 			for (i = 0; i < rec->len - 2; i++) if (rec->d[i+1] & 0x4000) rec->d[i+1] |= 0x8000;
 			amp = FindMaxofShort(&rec->d[1], rec->len - 2);
-			t = NSPERCHAN * FindHalfTime(&rec->d[1], rec->len - 2, amp);
-			switch (Map[mod-1][chan].type) {
-			case TYPE_SIPM:
-				sumSiPM += amp;
-				nSiPM++;
-				if (amp > CommonData->SummaSiPMThreshold && t > CommonData->SummaSiPMtime[0] && t < CommonData->SummaSiPMtime[1]) {
-					sumSiPMc += amp;
-					nSiPMc++;					
-				}
-				break;
-			case TYPE_PMT:
-				sumPMT += amp;
-				nPMT++;
-				break;
-			case TYPE_VETO:
-				nVeto++;
-				break;
-			}
+			t = NSPERCHAN * (FindHalfTime(&rec->d[1], rec->len - 2, amp) - rec->d[0] / 6.0);
 			if (!CommonData->hWaveForm && rWaveTrig->IsOn() && nWFD->GetIntNumber() == mod && nChan->GetIntNumber() == chan 
 				&& amp > nWaveThreshold->GetIntNumber()) {
 				sprintf(strl, "Event WaveForm for %d.%2.2d", mod, chan);
@@ -852,28 +859,14 @@ void dshowMainFrame::ProcessEvent(char *data)
 		CommonData->gLastTime = gTime;
 		CommonData->gTime = gTime;
 		CommonData->gTrig = gTrig;
-	} else if (gTime - CommonData->gLastTime >= ONESECOND) {
+	} else if (gTime - CommonData->gLastTime >= 5 * ONESECOND) {
 		CommonData->fRate[CommonData->iRatePos] = ((float) ONESECOND) * (gTrig - CommonData->gTrig) / (gTime - CommonData->gTime);
 		CommonData->iRatePos = (CommonData->iRatePos + 1) % RATELEN;
-		CommonData->gLastTime += ONESECOND;
+		CommonData->gLastTime += 5 * ONESECOND;
 		CommonData->gTime = gTime;
 		CommonData->gTrig = gTrig;
 	}
 //
-	if ((!CommonData->EventHits) && sumPMT >= nPMTSumThreshold->GetIntNumber() && sumSiPM >= nSiPMSumThreshold->GetIntNumber()) {
-		if (nHits > CommonData->EventLength) {
-			ptr = realloc(CommonData->Event, nHits * sizeof(struct evt_disp_struct));
-			if (ptr) {
-				CommonData->Event = (struct evt_disp_struct *) ptr;
-				memcpy(CommonData->Event, Event, nHits * sizeof(struct evt_disp_struct));
-				CommonData->EventLength = nHits;
-				CommonData->EventHits = nHits;
-			}
-		} else {
-			memcpy(CommonData->Event, Event, nHits * sizeof(struct evt_disp_struct));
-			CommonData->EventHits = nHits;
-		}
-	}
 //		TimeC
 	nat = 0;
 	at = 0;
@@ -883,7 +876,52 @@ void dshowMainFrame::ProcessEvent(char *data)
 	}
 	if (nat) {
 		at /= nat;
-		for (i = 0; i<nHits; i++) if (Event[i].amp > CommonData->TimeBThreshold) CommonData->hTimeC[Event[i].mod - 1]->Fill((double) Event[i].chan, Event[i].time - at);
+		if (nat > 1) for (i = 0; i<nHits; i++) if (Event[i].amp > CommonData->TimeBThreshold) CommonData->hTimeC[Event[i].mod - 1]->Fill((double) Event[i].chan, Event[i].time - at);
+	}
+//		Clean the event
+	if (CleanLength < EventLength) {
+		ptr = realloc(CleanEvent, EventLength * sizeof(struct evt_disp_struct));
+		if (!ptr) return;
+		CleanEvent = (struct evt_disp_struct *) ptr;
+		CleanLength = EventLength;
+	}
+	for (i=0; i<nHits; i++) {
+		if (Event[i].type == TYPE_SIPM && ((!nat) || fabs(Event[i].time - at) > CommonData->SiPMWindow)) continue;
+		memcpy(&CleanEvent[cHits], &Event[i], sizeof(struct evt_disp_struct));
+		cHits++;
+	}
+	for (i=0; i<cHits; i++) {
+		switch (CleanEvent[i].type) {
+		case TYPE_SIPM:
+			sumSiPM += CleanEvent[i].amp;
+			nSiPM++;
+			if (CleanEvent[i].amp > CommonData->SummaSiPMThreshold) {
+				sumSiPMc += CleanEvent[i].amp;
+				nSiPMc++;					
+			}
+			break;
+		case TYPE_PMT:
+			sumPMT += CleanEvent[i].amp;
+			nPMT++;
+			break;
+		case TYPE_VETO:
+			nVeto++;
+			break;
+		}
+	}
+	if ((!CommonData->EventHits) && sumPMT >= nPMTSumThreshold->GetIntNumber() && sumSiPM >= nSiPMSumThreshold->GetIntNumber()) {
+		if (cHits > CommonData->EventLength) {
+			ptr = realloc(CommonData->Event, cHits * sizeof(struct evt_disp_struct));
+			if (ptr) {
+				CommonData->Event = (struct evt_disp_struct *) ptr;
+				memcpy(CommonData->Event, CleanEvent, cHits * sizeof(struct evt_disp_struct));
+				CommonData->EventLength = cHits;
+				CommonData->EventHits = cHits;
+			}
+		} else {
+			memcpy(CommonData->Event, CleanEvent, cHits * sizeof(struct evt_disp_struct));
+			CommonData->EventHits = cHits;
+		}
 	}
 //	TH1D *hSiPMsum[2];	// SiPM summa, all/no veto
 	CommonData->hSiPMsum[0]->Fill(sumSiPMc / SIPM2MEV);
@@ -956,6 +994,7 @@ void dshowMainFrame::ResetTimeHists(void)
 	for (i=0; i<MAXWFD; i++) {
 		CommonData->hTimeA[i]->Reset();
 		CommonData->hTimeB[i]->Reset();
+		CommonData->hTimeC[i]->Reset();
 	}
 	TThread::UnLock();
 }
@@ -984,15 +1023,8 @@ void dshowMainFrame::ChangeTimeBThr(void)
 /*	Change Summa parameters				*/
 void dshowMainFrame::ChangeSummaPars(void)
 {
-	char str[64];
-
 	CommonData->SummaSiPMThreshold = SummaSiPMThreshold->GetIntNumber();
-	CommonData->SummaSiPMtime[0] = SummaSiPMtime->GetMinPosition();
-	CommonData->SummaSiPMtime[1] = SummaSiPMtime->GetMaxPosition();
-	sprintf(str, "%5.1f", CommonData->SummaSiPMtime[0]);
-	lbSiPMtime[0]->SetTitle(str);
-	sprintf(str, "%5.1f", CommonData->SummaSiPMtime[1]);
-	lbSiPMtime[1]->SetTitle(str);
+	CommonData->SiPMWindow = nSiPMWindow->GetNumber();
 }
 
 void dshowMainFrame::ReadConfig(const char *fname)
@@ -1187,11 +1219,15 @@ int FindMaxofShort(short int *data, int cnt)
 	return M;
 }
 
-int FindHalfTime(short int *data, int cnt, int amp)
+float FindHalfTime(short int *data, int cnt, int amp)
 {
 	int i;
+	float r;
 	for (i=0; i<cnt; i++) if (data[i] > amp/2) break;
-	return i;
+	if (!i) return 0;
+	r = amp;
+	r = (r/2 - data[i-1]) / (data[i] - data[i-1]);
+	return i + r - 1;
 }
 
 /*	the main						*/

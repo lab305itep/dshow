@@ -65,7 +65,7 @@ struct common_data_struct {
 	TH1D *hPMThits[2];	// PMT Hits, all/no veto
 	TH1D *hSPRatio[2];	// SiPM sum to PTMT sum ratio, all/no veto
 	int SummaSiPMThreshold;	// SiPM threshold for contribution in Summa histogramms
-	float SummaSiPMtime[2];	// SiPM time range
+	float SiPMWindow;	// SiPM window relative to the SiPM average time
 	TH1D *hRate;		// Rate
 	float *fRate;		// rate array
 	int iRatePos;		// current position in the fRate array
@@ -95,7 +95,9 @@ private:
 	struct common_data_struct *CommonData;
 	struct channel_struct Map[MAXWFD][64];
 	struct evt_disp_struct *Event;	// event under analysis
-	int EventLength;		// allocated area in hits
+	struct evt_disp_struct *CleanEvent;	// event under analysis, cleaned
+	int EventLength;		// allocated area in hits: Event
+	int CleanLength;		// allocated area in hits: CleanEvent
 	
 	TThread *DataThread;
 	TGStatusBar *fStatusBar;
@@ -120,9 +122,10 @@ private:
 	TGRadioButton *rSpectSingle;
 //		Time tab
 	TRootEmbeddedCanvas *fTimeCanvas;
-	TGNumberEntry *nTimeBThreshold;
 	TGRadioButton *rTimeAll;
 	TGRadioButton *rTimeSingle;
+	TGNumberEntry *nTimeBThreshold;
+	TGNumberEntry *nSiPMWindow;
 	TLegend *TimeLegend;
 //		Event display tab
 	TRootEmbeddedCanvas *fEventCanvas;
@@ -134,8 +137,6 @@ private:
 //		Summa tab
 	TRootEmbeddedCanvas *fSummaCanvas;
 	TGNumberEntry *SummaSiPMThreshold;
-	TGDoubleHSlider *SummaSiPMtime;
-	TGLabel *lbSiPMtime[2];
 	TLegend *SummaLegend;
 //		Rate tab
 	TRootEmbeddedCanvas *fRateCanvas;
@@ -179,5 +180,5 @@ public:
 };
 
 int FindMaxofShort(short int *data, int cnt);
-int FindHalfTime(short int *data, int cnt, int ampl);
+float FindHalfTime(short int *data, int cnt, int ampl);
 
