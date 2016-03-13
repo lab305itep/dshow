@@ -14,6 +14,9 @@
 #define RATELEN	1000
 //	A second in GTIME units 
 #define ONESECOND 125000000
+//	Strip sizes in cm
+#define WIDTH	4.0
+#define THICK	1.0
 
 class TCanvas;
 class TGCheckButton;
@@ -76,6 +79,8 @@ struct common_data_struct {
 	int EventHits;		// hits in event to display ready signature when not zero
 	int EventLength;	// number of hits allocated
 	struct evt_disp_struct *Event;	// allocated by analysis for display
+	float EventEnergy;	// for display
+	int EventTag;		// for display
 };
 
 #define TYPE_SIPM	0
@@ -88,6 +93,26 @@ struct channel_struct {
 	char z;			// z : 0 - 99, x - odd, y - even.
 };
 
+#define TAG_NONE	0
+#define TAG_VETO	1
+#define TAG_POSITRON	2
+#define TAG_NEUTRON	3
+
+struct select_parm_struct {
+//	Positron cuts
+	float eHitMin;
+	float ePosMin;
+	float ePosMax;
+	float ePosFraction;
+	int nClustMax;
+//	Neutron cuts
+	int nMin;
+	float eNMin;
+	float eNMax;
+	float rMax;
+	float eNFraction;
+};
+
 void *DataThreadFunction(void *ptr);
 
 class dshowMainFrame : public TGMainFrame {
@@ -98,6 +123,9 @@ private:
 	struct evt_disp_struct *CleanEvent;	// event under analysis, cleaned
 	int EventLength;		// allocated area in hits: Event
 	int CleanLength;		// allocated area in hits: CleanEvent
+	int EventTag;
+	float EventEnergy;
+	struct select_parm_struct Pars;
 	
 	TThread *DataThread;
 	TGStatusBar *fStatusBar;
@@ -133,6 +161,11 @@ private:
 	TGNumberEntry *nSiPMThreshold;
 	TGNumberEntry *nPMTSumThreshold;
 	TGNumberEntry *nSiPMSumThreshold;
+	TGRadioButton *rEvtAll;
+	TGRadioButton *rEvtNone;
+	TGRadioButton *rEvtVeto;
+	TGRadioButton *rEvtNeutron;
+	TGRadioButton *rEvtPositron;
 	int PaletteStart;
 //		Summa tab
 	TRootEmbeddedCanvas *fSummaCanvas;
@@ -160,6 +193,8 @@ private:
 	void CreateSummaTab(TGTab *tab);
 	void CreateRateTab(TGTab *tab);
 	void DrawEvent(TCanvas *cv);
+	void CalculateTags(int nHits);
+	int neighbors(int xy1, int xy2, int z1, int z2);
 public:
    	dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h);
    	virtual ~dshowMainFrame(void);

@@ -392,6 +392,15 @@ void dshowMainFrame::CreateEventTab(TGTab *tab)
 	nSiPMSumThreshold->SetIntNumber(100);
    	hframe->AddFrame(nSiPMSumThreshold, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));
 
+	TGButtonGroup *bg = new TGButtonGroup(hframe, "Tagged as", kHorizontalFrame);
+	rEvtAll      = new TGRadioButton(bg, "&Any       ");
+	rEvtNone     = new TGRadioButton(bg, "&None      ");
+	rEvtVeto     = new TGRadioButton(bg, "&Veto      ");
+	rEvtNeutron  = new TGRadioButton(bg, "&Neutron   ");
+	rEvtPositron = new TGRadioButton(bg, "&Positron  ");
+	rEvtAll->SetState(kButtonDown);
+   	hframe->AddFrame(bg, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));
+
     	me->AddFrame(hframe, new TGLayoutHints(kLHintsBottom | kLHintsExpandX, 2, 2, 2, 2));
 }
 
@@ -628,6 +637,7 @@ void dshowMainFrame::DrawEvent(TCanvas *cv)
 	TBox PmtBox;
 	TBox SipmBox;
 	TGaxis ax;
+	TText txt;
 	int i, j, k, n;
 	int thSiPM, thPMT;
 	const struct vpos_struct {
@@ -666,6 +676,7 @@ void dshowMainFrame::DrawEvent(TCanvas *cv)
 		{-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0},
 		{-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0},
 	};
+	const char *tagname[] = {"NONE", "VETO", "POSITRON", "NEUTRON"};
 
 	if (!CommonData->EventHits) return;
 //		Draw DANSS	
@@ -718,6 +729,8 @@ void dshowMainFrame::DrawEvent(TCanvas *cv)
 	}
 
 	ax.DrawAxis(0.05, 0.05, 0.95, 0.05, 0.0, (double) MAXADC);
+//		Draw TAG
+	txt.DrawText(0.2, 0.95, tagname[CommonData->EventTag]);
 
 	CommonData->EventHits = 0;
 }
@@ -890,6 +903,7 @@ void dshowMainFrame::ProcessEvent(char *data)
 		memcpy(&CleanEvent[cHits], &Event[i], sizeof(struct evt_disp_struct));
 		cHits++;
 	}
+	CalculateTags(cHits);
 	for (i=0; i<cHits; i++) {
 		switch (CleanEvent[i].type) {
 		case TYPE_SIPM:
@@ -907,20 +921,6 @@ void dshowMainFrame::ProcessEvent(char *data)
 		case TYPE_VETO:
 			nVeto++;
 			break;
-		}
-	}
-	if ((!CommonData->EventHits) && sumPMT >= nPMTSumThreshold->GetIntNumber() && sumSiPM >= nSiPMSumThreshold->GetIntNumber()) {
-		if (cHits > CommonData->EventLength) {
-			ptr = realloc(CommonData->Event, cHits * sizeof(struct evt_disp_struct));
-			if (ptr) {
-				CommonData->Event = (struct evt_disp_struct *) ptr;
-				memcpy(CommonData->Event, CleanEvent, cHits * sizeof(struct evt_disp_struct));
-				CommonData->EventLength = cHits;
-				CommonData->EventHits = cHits;
-			}
-		} else {
-			memcpy(CommonData->Event, CleanEvent, cHits * sizeof(struct evt_disp_struct));
-			CommonData->EventHits = cHits;
 		}
 	}
 //	TH1D *hSiPMsum[2];	// SiPM summa, all/no veto
@@ -944,6 +944,121 @@ void dshowMainFrame::ProcessEvent(char *data)
 		CommonData->hPMThits[1]->Fill(1.0*nPMT);
 //	TH1D *hSPRatio[2];	// SiPM sum to PTMT sum ratio, all/no veto
 		if (sumPMT > 0) CommonData->hSPRatio[1]->Fill(sumSiPMc * PMT2MEV / (sumPMT * SIPM2MEV));
+	}
+//		Copy event for drawing
+	if ((!CommonData->EventHits) && sumPMT >= nPMTSumThreshold->GetIntNumber() && sumSiPM >= nSiPMSumThreshold->GetIntNumber() && 
+		(rEvtAll->IsOn() || (rEvtNone->IsOn() && EventTag == TAG_NONE) || (rEvtVeto->IsOn() && EventTag == TAG_VETO) 
+		|| (rEvtPositron->IsOn() && EventTag == TAG_POSITRON) || (rEvtNeutron->IsOn() && EventTag == TAG_NEUTRON))) {
+		if (cHits > CommonData->EventLength) {
+			ptr = realloc(CommonData->Event, cHits * sizeof(struct evt_disp_struct));
+			if (ptr) {
+				CommonData->Event = (struct evt_disp_struct *) ptr;
+				memcpy(CommonData->Event, CleanEvent, cHits * sizeof(struct evt_disp_struct));
+				CommonData->EventLength = cHits;
+				CommonData->EventHits = cHits;
+			}
+		} else {
+			memcpy(CommonData->Event, CleanEvent, cHits * sizeof(struct evt_disp_struct));
+			CommonData->EventHits = cHits;
+		}
+		CommonData->EventTag = EventTag;
+		CommonData->EventEnergy = EventEnergy;
+	}
+}
+
+/*	Check event for veto/positron/neutron signature		*/
+void dshowMainFrame::CalculateTags(int cHits)
+{
+	float xsum, exsum, ysum, eysum, zsum;
+	int ncHits;
+	float eall, eclust, r2, xy0;
+	float E;
+	int i, j;
+
+	eall = 0;
+	for (i=0; i<cHits; i++) if (CleanEvent[i].type == TYPE_SIPM) eall += CleanEvent[i].amp;
+	eall /= SIPM2MEV;
+
+	EventTag = TAG_NONE;
+	EventEnergy = eall;
+
+//	VETO
+	for (i=0; i<cHits; i++) if (CleanEvent[i].type == TYPE_VETO) {
+		EventTag = TAG_VETO;
+		return;
+	}
+//	Check for neutron
+//		Calculate parameters
+//		Energy center
+	xsum = 0;
+	exsum = 0;
+	ysum = 0;
+	eysum = 0;
+	
+	for (i=0; i<cHits; i++) if (CleanEvent[i].type == TYPE_SIPM && CleanEvent[i].amp > Pars.eHitMin * SIPM2MEV) {
+		if (CleanEvent[i].z & 1) {	// X
+			exsum += CleanEvent[i].amp;
+			xsum += CleanEvent[i].amp * CleanEvent[i].xy;
+		} else {			// Y
+			eysum += CleanEvent[i].amp;
+			ysum += CleanEvent[i].amp * CleanEvent[i].xy;
+		}
+		zsum += CleanEvent[i].amp * CleanEvent[i].z;
+	}
+	if (exsum > 0) {
+		xsum /= exsum;
+	} else {
+		xsum = -1;
+	}
+	if (eysum > 0) {
+		ysum /= eysum;
+	} else {
+		ysum = -1;
+	}
+	if (exsum + eysum > 0) {
+		zsum /= exsum + eysum;
+	} else {
+		zsum = -1;
+	}
+//		Count clusters and neutron energy
+	ncHits = 0;
+	eclust = 0;
+	for (i=0; i<cHits; i++) if (CleanEvent[i].type == TYPE_SIPM) {
+		xy0 = (CleanEvent[i].z & 1) ? xsum : ysum;
+		if (xy0 > 0) {
+			r2 = (CleanEvent[i].xy - xy0) * (CleanEvent[i].xy - xy0) * WIDTH * WIDTH + (CleanEvent[i].z - zsum) * (CleanEvent[i].z - zsum) * THICK * THICK;
+			if (r2 > Pars.rMax * Pars.rMax) continue;
+		}
+		eclust += CleanEvent[i].amp;
+		if (CleanEvent[i].amp > Pars.eHitMin * SIPM2MEV) ncHits++;
+	}
+	eclust /= SIPM2MEV;
+//		Implement criteria
+	if (ncHits >= Pars.nMin && eclust > Pars.eNMin && eclust < Pars.eNMax && eclust / eall > Pars.eNFraction) {
+		EventTag = TAG_NEUTRON;
+		EventEnergy = eclust;
+		return;
+	}
+//		Check for pisitron
+//		Find consequtive cluster near EMAX strip
+	E = 0;
+	for (i=0; i<cHits; i++) if (CleanEvent[i].type == TYPE_SIPM) if (CleanEvent[i].amp > E) {
+		E = CleanEvent[i].amp;
+		j = i;
+	}
+	ncHits = 0;
+	eclust = 0;
+	for (i=0; i<cHits; i++) if (CleanEvent[i].type == TYPE_SIPM && neighbors(CleanEvent[i].xy, CleanEvent[j].xy, CleanEvent[i].z, CleanEvent[j].z)) {
+		ncHits++;
+		eclust += CleanEvent[i].amp;
+	}
+	eclust /= SIPM2MEV;
+	E /= SIPM2MEV;
+//		Implement criteria
+	if (E > Pars.eHitMin && ncHits <= Pars.nClustMax && eclust > Pars.ePosMin && eclust < Pars.ePosMax && eclust / eall > Pars.eNFraction) {
+		EventTag = TAG_POSITRON;
+		EventEnergy = eclust;
+		return;		
 	}
 }
 
@@ -1031,6 +1146,7 @@ void dshowMainFrame::ReadConfig(const char *fname)
 {
 	config_t cnf;
 	long tmp;
+	double dtmp;
 	int i, j, k, type, xy, z;
 	config_setting_t *ptr_xy;
 	config_setting_t *ptr_z;
@@ -1086,8 +1202,40 @@ void dshowMainFrame::ReadConfig(const char *fname)
 			break;
 		}
 	}
+	
+//		Analysis parameters
+//	float eHitMin;
+	Pars.eHitMin = (config_lookup_float(&cnf, "Dshow.eHitMin", &dtmp)) ? dtmp : 0.4;
+//	Positron specific
+//	float ePosMin;
+	Pars.ePosMin = (config_lookup_float(&cnf, "Dshow.ePosMin", &dtmp)) ? dtmp : 1.0;
+//	float ePosMax;
+	Pars.ePosMax = (config_lookup_float(&cnf, "Dshow.ePosMax", &dtmp)) ? dtmp : 6.0;
+//	float ePosFraction;
+	Pars.ePosFraction = (config_lookup_float(&cnf, "Dshow.ePosFraction", &dtmp)) ? dtmp : 0.5;
+//	int nClustMax;
+	Pars.nClustMax = (config_lookup_int(&cnf, "Dshow.nClustMax", &tmp)) ? tmp : 4;
+//	Neutron cuts
+//	int nMin;
+	Pars.nMin = (config_lookup_int(&cnf, "Dshow.nMin", &tmp)) ? tmp : 5;
+//	float eNMin;
+	Pars.eNMin = (config_lookup_float(&cnf, "Dshow.eNMin", &dtmp)) ? dtmp : 3.0;
+//	float eNMax;
+	Pars.eNMax = (config_lookup_float(&cnf, "Dshow.eNMax", &dtmp)) ? dtmp : 10.0;
+//	float rMax;
+	Pars.rMax = (config_lookup_float(&cnf, "Dshow.rMax", &dtmp)) ? dtmp : 20.0;
+//	float rMax;
+	Pars.eNFraction = (config_lookup_float(&cnf, "Dshow.eNFraction", &dtmp)) ? dtmp : 0.8;
 
 	config_destroy(&cnf);
+}
+
+/*	Return 1 if strips are neighbors.		*/
+int dshowMainFrame::neighbors(int xy1, int xy2, int z1, int z2)
+{
+	if (abs(z1-z2) == 1) return 1;
+	if (z1 == z2 && abs(xy1 - xy2) <= 1) return 1;
+	return 0;
 }
 
 /*	Data analysis thread				*/
