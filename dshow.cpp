@@ -43,7 +43,7 @@
 #include "dshow.h"
 #include "recformat.h"
 
-const char *DataFileTypes[] = {"All files", "*", "Data files", "*.dat*", 0, 0};
+const char *DataFileTypes[] = {"Data files", "*.dat*", "All files", "*", 0, 0};
 const char *RateName[] = {"All", "NO veto"};
 
 /*	Class dshowMainFrame - the main window		*/
@@ -618,6 +618,7 @@ void dshowMainFrame::DoDraw(void)
 /*		Rates				*/
    	fCanvas = fRateCanvas->GetCanvas();
    	fCanvas->cd();
+	fCanvas->Clear();
 	for (j=0; j<RATELEN; j++) CommonData->hRate->SetBinContent(j+1, CommonData->fRate[(CommonData->iRatePos + j) % RATELEN]);
    	if (CommonData->hRate->Integral() > 1) {
 		CommonData->hRate->Fit("pol0", "Q", "p");
@@ -1145,7 +1146,11 @@ void dshowMainFrame::ChangeSummaPars(void)
 void dshowMainFrame::ReadConfig(const char *fname)
 {
 	config_t cnf;
+#ifdef LIBCONFIG_VER_MAJOR
+	int tmp;
+#else
 	long tmp;
+#endif
 	double dtmp;
 	int i, j, k, type, xy, z;
 	config_setting_t *ptr_xy;
@@ -1254,6 +1259,7 @@ void *DataThreadFunction(void *ptr)
 	int iNum;
 	int Cnt;
 	TObject *f;
+	char cmd[1024];
 	
 	Main = (dshowMainFrame *)ptr;
 	CommonData = Main->CommonData;
@@ -1270,14 +1276,38 @@ void *DataThreadFunction(void *ptr)
 	iNum = Main->nPlayBlocks->GetIntNumber();
 	Main->fStatusBar->SetText(f->GetName(), 5);
 	Main->PlayProgress->SetPosition(0);
-	fIn = fopen(f->GetName(), "rb");
-	if (!fIn) {
-		CommonData->iError = 15;
-		goto Ret;
+	fsize = 0x300000000L;
+	if (strstr(f->GetName(), ".bz2")) {
+		sprintf(cmd, "bzcat %s", f->GetName());
+		fIn = popen(cmd, "r");
+		if (!fIn) {
+			CommonData->iError = 12;
+			goto Ret;
+		}
+	} else if (strstr(f->GetName(), ".gz")) {
+		sprintf(cmd, "zcat %s", f->GetName());
+		fIn = popen(cmd, "r");
+		if (!fIn) {
+			CommonData->iError = 13;
+			goto Ret;
+		}
+	} else if (strstr(f->GetName(), ".xz")) {
+		sprintf(cmd, "xzcat %s", f->GetName());
+		fIn = popen(cmd, "r");
+		if (!fIn) {
+			CommonData->iError = 14;
+			goto Ret;
+		}
+	} else {
+		fIn = fopen(f->GetName(), "rb");
+		if (!fIn) {
+			CommonData->iError = 15;
+			goto Ret;
+		}
+		fseek(fIn, 0, SEEK_END);
+		fsize = ftello(fIn);
+		fseek(fIn, 0, SEEK_SET);
 	}
-	fseek(fIn, 0, SEEK_END);
-	fsize = ftello(fIn);
-	fseek(fIn, 0, SEEK_SET);
 	rsize = 0;
 	Cnt = 0;
 	
