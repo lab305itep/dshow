@@ -120,7 +120,13 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h) : TGMainFr
 	SummaLegend->AddEntry(CommonData->hSiPMsum[0], "All events", "L");
 	SummaLegend->AddEntry(CommonData->hSiPMsum[1], "NO veto", "L");
 	SummaLegend->SetFillColor(kWhite);
-
+//	Taged events distributions
+	CommonData->hTagEnergy[0] = new TH1D("hEPositron", "Energy distribution of positron-like events", 100, 0, 10);
+	CommonData->hTagEnergy[1] = new TH1D("hENeutron", "Energy distribution of neutron-like events", 100, 0, 10);
+	CommonData->hTagXY[0] = new TH2D("hXYPositron", "XY-distribution of positron-like events", 25, 0, 100, 25, 0, 100);
+	CommonData->hTagXY[1] = new TH2D("hXYNeutron", "XY-distribution of neutron-like events", 25, 0, 100, 25, 0, 100);
+	CommonData->hTagZ[0] = new TH2D("hZPositron", "Z-distribution of positron-like events", 25, 0, 100, 25, 0, 100);
+	CommonData->hTagZ[1] = new TH2D("hZNeutron", "Z-distribution of neutron-like events", 25, 0, 100, 25, 0, 100);	
 //	Rate
 	CommonData->hRate = new TH1D("hRate", "Trigger rate, Hz;s", RATELEN, -5 * RATELEN, 0);
 	CommonData->hRate->SetStats(0);
@@ -152,6 +158,7 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h) : TGMainFr
 	CreateEventTab(tab);
 	CreateSummaTab(tab);
 	CreateRateTab(tab);
+	CreateTagTab(tab);
 	hframe->AddFrame(tab, new TGLayoutHints(kLHintsExpandX | kLHintsExpandY, 5, 5, 3, 4));
 	
    	TGVerticalFrame *vframe=new TGVerticalFrame(hframe, 50, h);
@@ -426,6 +433,22 @@ void dshowMainFrame::CreateSummaTab(TGTab *tab)
 
    	TGTextButton *reset = new TGTextButton(hframe,"&Reset");
 	reset->Connect("Clicked()", "dshowMainFrame", this, "ResetSummaHists()");
+   	hframe->AddFrame(reset, new TGLayoutHints(kLHintsCenterY | kLHintsRight, 5, 5, 3, 4));
+
+    	me->AddFrame(hframe, new TGLayoutHints(kLHintsBottom | kLHintsExpandX, 2, 2, 2, 2));
+}
+
+/*	Create Tagged event parameters tab				*/
+void dshowMainFrame::CreateTagTab(TGTab *tab)
+{
+	TGCompositeFrame *me = tab->AddTab("Positron & Neutron");
+
+	fTagCanvas = new TRootEmbeddedCanvas ("TagCanvas", me, 1600, 800);
+   	me->AddFrame(fTagCanvas, new TGLayoutHints(kLHintsExpandX | kLHintsExpandY, 10, 10, 10, 1));
+
+   	TGHorizontalFrame *hframe=new TGHorizontalFrame(me);
+   	TGTextButton *reset = new TGTextButton(hframe,"&Reset");
+	reset->Connect("Clicked()", "dshowMainFrame", this, "ResetTagHists()");
    	hframe->AddFrame(reset, new TGLayoutHints(kLHintsCenterY | kLHintsRight, 5, 5, 3, 4));
 
     	me->AddFrame(hframe, new TGLayoutHints(kLHintsBottom | kLHintsExpandX, 2, 2, 2, 2));

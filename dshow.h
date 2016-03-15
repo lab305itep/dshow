@@ -67,6 +67,9 @@ struct common_data_struct {
 	TH1D *hPMTsum[2];	// PMT summa, all/no veto
 	TH1D *hPMThits[2];	// PMT Hits, all/no veto
 	TH1D *hSPRatio[2];	// SiPM sum to PTMT sum ratio, all/no veto
+	TH1D *hTagEnergy[2];	// Computed enegry for tagged events
+	TH2D *hTagXY[2];	// XY-distribution for tagged events
+	TH1D *hTagZ[2];		// Z-distribution for tagged events
 	int SummaSiPMThreshold;	// SiPM threshold for contribution in Summa histogramms
 	float SiPMWindow;	// SiPM window relative to the SiPM average time
 	TH1D *hRate;		// Rate
@@ -173,6 +176,8 @@ private:
 	TLegend *SummaLegend;
 //		Rate tab
 	TRootEmbeddedCanvas *fRateCanvas;
+//		Tagged tab
+	TRootEmbeddedCanvas *fTagCanvas;	
 //		Right buttons
 	TGCheckButton *Pause;
 	TGNumberEntry *nRefresh;
@@ -192,6 +197,7 @@ private:
 	void CreateEventTab(TGTab *tab);
 	void CreateSummaTab(TGTab *tab);
 	void CreateRateTab(TGTab *tab);
+	void CreateTagTab(TGTab *tab);
 	void DrawEvent(TCanvas *cv);
 	void CalculateTags(int nHits);
 	int neighbors(int xy1, int xy2, int z1, int z2);
@@ -204,6 +210,7 @@ public:
 	void ResetSpectrumHists(void);
 	void ResetTimeHists(void);
 	void ResetSummaHists(void);
+	void ResetTagHists(void);
 	void ChangeTimeBThr(void);
 	void ChangeSummaPars(void);
 	void OnTimer(void);
