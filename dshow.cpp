@@ -48,7 +48,7 @@ const char *RateName[] = {"All", "NO veto"};
 
 /*	Class dshowMainFrame - the main window		*/
 /*	Main window Constructor				*/
-dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h) : TGMainFrame(p, w, h) 
+dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h, const char *cfgname) : TGMainFrame(p, w, h) 
 {
 	char strs[64];
 	char strl[1024];
@@ -60,6 +60,7 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h) : TGMainFr
 	int i;
 	TGLabel *lb;
 	
+	ReadConfig(cfgname);
 	// Create our data structures and histogramms
 	CommonData = (struct common_data_struct *) malloc(sizeof(struct common_data_struct));
 	memset(CommonData, 0, sizeof(struct common_data_struct));
@@ -67,6 +68,9 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h) : TGMainFr
 	EventLength = 0;
 	CleanEvent = NULL;
 	CleanLength = 0;
+	Recent[0].gTime = -ONESECOND;
+	Recent[1].gTime = -ONESECOND;
+	Recent[2].gTime = -ONESECOND;
 
 	gROOT->SetStyle("Plain");
 	gStyle->SetOptStat("e");
@@ -121,14 +125,14 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h) : TGMainFr
 	SummaLegend->AddEntry(CommonData->hSiPMsum[1], "NO veto", "L");
 	SummaLegend->SetFillColor(kWhite);
 //	Taged events distributions
-	CommonData->hTagEnergy[0] = new TH1D("hEPositron", "Energy distribution of positron-like events", 100, 0, 10);
-	CommonData->hTagEnergy[1] = new TH1D("hENeutron", "Energy distribution of neutron-like events", 100, 0, 10);
-	CommonData->hTagXY[0] = new TH2D("hXYPositron", "XY-distribution of positron-like events", 25, 0, 100, 25, 0, 100);
-	CommonData->hTagXY[1] = new TH2D("hXYNeutron", "XY-distribution of neutron-like events", 25, 0, 100, 25, 0, 100);
-	CommonData->hTagZ[0] = new TH2D("hZPositron", "Z-distribution of positron-like events", 25, 0, 100, 25, 0, 100);
-	CommonData->hTagZ[1] = new TH2D("hZNeutron", "Z-distribution of neutron-like events", 25, 0, 100, 25, 0, 100);	
+	CommonData->hTagEnergy[0] = new TH1D("hEPositron", "Energy distribution of positron-like events;MeV", 100, 0, 10);
+	CommonData->hTagEnergy[1] = new TH1D("hENeutron", "Energy distribution of neutron-like events;MeV", 100, 0, 10);
+	CommonData->hTagXY[0] = new TH2D("hXYPositron", "XY-distribution of positron-like events;cm;cm", 25, 0, 100, 25, 0, 100);
+	CommonData->hTagXY[1] = new TH2D("hXYNeutron", "XY-distribution of neutron-like events;cm;cm", 25, 0, 100, 25, 0, 100);
+	CommonData->hTagZ[0] = new TH1D("hZPositron", "Z-distribution of positron-like events;cm", 100, 0, 100);
+	CommonData->hTagZ[1] = new TH1D("hZNeutron", "Z-distribution of neutron-like events;cm", 100, 0, 100);	
 //	Rate
-	CommonData->hRate = new TH1D("hRate", "Trigger rate, Hz;s", RATELEN, -5 * RATELEN, 0);
+	CommonData->hRate = new TH1D("hRate", "Trigger rate, Hz;s", RATELEN, -RATEPER * RATELEN, 0);
 	CommonData->hRate->SetStats(0);
 	CommonData->hRate->SetMarkerStyle(20);
 	CommonData->hRate->SetMarkerColor(kBlue);
@@ -136,6 +140,15 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h) : TGMainFr
 	memset(CommonData->fRate, 0, RATELEN * sizeof(float));
 	CommonData->iRatePos = 0;
 	CommonData->gLastTime = -1;
+//	Neutrino events
+	CommonData->hNeutrinoEnergy[0] = new TH1D("hEPositronN", "Energy distribution of positrons in neutrino-like events;MeV", 100, 0, 10);
+	CommonData->hNeutrinoEnergy[1] = new TH1D("hENeutronN", "Energy distribution of neutron capture in neutrino-like events;MeV", 100, 0, 10);
+	CommonData->hCaptureTime = new TH1D("hCaptureTime", "Time distribution of neutron capture in neutrino-like events;us", 100, 0, 50);
+//	Muon capture events
+	CommonData->hMesoEnergy[0] = new TH1D("hEPositronM", "Energy distribution of positrons in mesoatom-like events;MeV", 100, 0, 10);
+	CommonData->hMesoEnergy[1] = new TH1D("hENeutronM", "Energy distribution of neutron capture in mesoatom-like events;MeV", 100, 0, 10);
+	CommonData->hMesoTime[0] = new TH1D("hMesoTime", "Time distribution of mesoatom decay in mesoatom-like events;us", 100, 0, 50);
+	CommonData->hMesoTime[1] = new TH1D("hCaptureTimeM", "Time distribution of neutron capture in mesoatom-like events;us", 100, 0, 50);
 
 	PlayFile = new TGFileInfo();
 	PlayFile->fFileTypes = DataFileTypes;
@@ -159,6 +172,8 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h) : TGMainFr
 	CreateSummaTab(tab);
 	CreateRateTab(tab);
 	CreateTagTab(tab);
+	CreateNeutrinoTab(tab);
+	CreateMuonTab(tab);
 	hframe->AddFrame(tab, new TGLayoutHints(kLHintsExpandX | kLHintsExpandY, 5, 5, 3, 4));
 	
    	TGVerticalFrame *vframe=new TGVerticalFrame(hframe, 50, h);
@@ -403,8 +418,8 @@ void dshowMainFrame::CreateEventTab(TGTab *tab)
 	rEvtAll      = new TGRadioButton(bg, "&Any       ");
 	rEvtNone     = new TGRadioButton(bg, "&None      ");
 	rEvtVeto     = new TGRadioButton(bg, "&Veto      ");
-	rEvtNeutron  = new TGRadioButton(bg, "&Neutron   ");
 	rEvtPositron = new TGRadioButton(bg, "&Positron  ");
+	rEvtNeutron  = new TGRadioButton(bg, "&Neutron   ");
 	rEvtAll->SetState(kButtonDown);
    	hframe->AddFrame(bg, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));
 
@@ -438,6 +453,15 @@ void dshowMainFrame::CreateSummaTab(TGTab *tab)
     	me->AddFrame(hframe, new TGLayoutHints(kLHintsBottom | kLHintsExpandX, 2, 2, 2, 2));
 }
 
+/*	Create event rate tab				*/
+void dshowMainFrame::CreateRateTab(TGTab *tab)
+{
+	TGCompositeFrame *me = tab->AddTab("Rates");
+
+	fRateCanvas = new TRootEmbeddedCanvas ("RateCanvas", me, 1600, 800);
+   	me->AddFrame(fRateCanvas, new TGLayoutHints(kLHintsExpandX | kLHintsExpandY, 10, 10, 10, 1));
+}
+
 /*	Create Tagged event parameters tab				*/
 void dshowMainFrame::CreateTagTab(TGTab *tab)
 {
@@ -454,14 +478,38 @@ void dshowMainFrame::CreateTagTab(TGTab *tab)
     	me->AddFrame(hframe, new TGLayoutHints(kLHintsBottom | kLHintsExpandX, 2, 2, 2, 2));
 }
 
-/*	Create event rate tab				*/
-void dshowMainFrame::CreateRateTab(TGTab *tab)
+/*	Create Neutrino event parameters tab				*/
+void dshowMainFrame::CreateNeutrinoTab(TGTab *tab)
 {
-	TGCompositeFrame *me = tab->AddTab("Rates");
+	TGCompositeFrame *me = tab->AddTab("Neutrino");
 
-	fRateCanvas = new TRootEmbeddedCanvas ("RateCanvas", me, 1600, 800);
-   	me->AddFrame(fRateCanvas, new TGLayoutHints(kLHintsExpandX | kLHintsExpandY, 10, 10, 10, 1));
+	fNeutrinoCanvas = new TRootEmbeddedCanvas ("NeutrinoCanvas", me, 1600, 800);
+   	me->AddFrame(fNeutrinoCanvas, new TGLayoutHints(kLHintsExpandX | kLHintsExpandY, 10, 10, 10, 1));
+
+   	TGHorizontalFrame *hframe=new TGHorizontalFrame(me);
+   	TGTextButton *reset = new TGTextButton(hframe,"&Reset");
+	reset->Connect("Clicked()", "dshowMainFrame", this, "ResetNeutrinoHists()");
+   	hframe->AddFrame(reset, new TGLayoutHints(kLHintsCenterY | kLHintsRight, 5, 5, 3, 4));
+
+    	me->AddFrame(hframe, new TGLayoutHints(kLHintsBottom | kLHintsExpandX, 2, 2, 2, 2));
 }
+
+/*	Create Mesoatom event parameters tab				*/
+void dshowMainFrame::CreateMuonTab(TGTab *tab)
+{
+	TGCompositeFrame *me = tab->AddTab("Mesoatom");
+
+	fMuonCanvas = new TRootEmbeddedCanvas ("MuonCanvas", me, 1600, 800);
+   	me->AddFrame(fMuonCanvas, new TGLayoutHints(kLHintsExpandX | kLHintsExpandY, 10, 10, 10, 1));
+
+   	TGHorizontalFrame *hframe=new TGHorizontalFrame(me);
+   	TGTextButton *reset = new TGTextButton(hframe,"&Reset");
+	reset->Connect("Clicked()", "dshowMainFrame", this, "ResetMuonHists()");
+   	hframe->AddFrame(reset, new TGLayoutHints(kLHintsCenterY | kLHintsRight, 5, 5, 3, 4));
+
+    	me->AddFrame(hframe, new TGLayoutHints(kLHintsBottom | kLHintsExpandX, 2, 2, 2, 2));
+}
+
 
 /*	Timer interrupt - once per second		*/
 void dshowMainFrame::OnTimer(void)
@@ -637,7 +685,7 @@ void dshowMainFrame::DoDraw(void)
    	fCanvas->cd(6);
 	SummaLegend->Draw();	
    	fCanvas->Update();
-
+   	
 /*		Rates				*/
    	fCanvas = fRateCanvas->GetCanvas();
    	fCanvas->cd();
@@ -649,6 +697,47 @@ void dshowMainFrame::DoDraw(void)
 		txt.DrawTextNDC(0.75, 0.91, str);
 	} else {
 		CommonData->hRate->Draw("p");
+	}
+   	fCanvas->Update();
+
+/*		Tagged events			*/
+   	fCanvas = fTagCanvas->GetCanvas();
+   	fCanvas->cd();
+	fCanvas->Clear();
+	fCanvas->Divide(3, 2);
+	for (i=0; i<2; i++) {
+	   	fCanvas->cd(3 * i + 1);
+		CommonData->hTagEnergy[i]->Draw();
+	   	fCanvas->cd(3 * i + 2);
+		CommonData->hTagXY[i]->Draw("color");
+	   	fCanvas->cd(3 * i + 3);
+		CommonData->hTagZ[i]->Draw();
+	}
+   	fCanvas->Update();
+
+/*		Neutrino events			*/
+   	fCanvas = fNeutrinoCanvas->GetCanvas();
+   	fCanvas->cd();
+	fCanvas->Clear();
+	fCanvas->Divide(3);
+	fCanvas->cd(1);
+	CommonData->hNeutrinoEnergy[0]->Draw();
+	fCanvas->cd(2);
+	CommonData->hNeutrinoEnergy[1]->Draw();
+	fCanvas->cd(3);
+	CommonData->hCaptureTime->Draw();
+   	fCanvas->Update();
+
+/*		Mesoatom events			*/
+   	fCanvas = fMuonCanvas->GetCanvas();
+   	fCanvas->cd();
+	fCanvas->Clear();
+	fCanvas->Divide(2, 2);
+	for (i=0; i<2; i++) {
+	   	fCanvas->cd(2 * i + 1);
+		CommonData->hMesoEnergy[i]->Draw();
+	   	fCanvas->cd(2* i + 2);
+		CommonData->hMesoTime[i]->Draw();
 	}
    	fCanvas->Update();
 
@@ -801,6 +890,7 @@ void dshowMainFrame::ProcessEvent(char *data)
 	int gTrig;
 	int nHits;
 	int cHits;
+	float dtM, dtN;
 
 	sumPMT = 0;
 	sumSiPM = 0;
@@ -896,10 +986,10 @@ void dshowMainFrame::ProcessEvent(char *data)
 		CommonData->gLastTime = gTime;
 		CommonData->gTime = gTime;
 		CommonData->gTrig = gTrig;
-	} else if (gTime - CommonData->gLastTime >= 5 * ONESECOND) {
+	} else if (gTime - CommonData->gLastTime >= RATEPER * ONESECOND) {
 		CommonData->fRate[CommonData->iRatePos] = ((float) ONESECOND) * (gTrig - CommonData->gTrig) / (gTime - CommonData->gTime);
 		CommonData->iRatePos = (CommonData->iRatePos + 1) % RATELEN;
-		CommonData->gLastTime += 5 * ONESECOND;
+		CommonData->gLastTime += RATEPER * ONESECOND;
 		CommonData->gTime = gTime;
 		CommonData->gTrig = gTrig;
 	}
@@ -927,7 +1017,7 @@ void dshowMainFrame::ProcessEvent(char *data)
 		memcpy(&CleanEvent[cHits], &Event[i], sizeof(struct evt_disp_struct));
 		cHits++;
 	}
-	CalculateTags(cHits);
+	CalculateTags(cHits, gTime);
 	for (i=0; i<cHits; i++) {
 		switch (CleanEvent[i].type) {
 		case TYPE_SIPM:
@@ -988,10 +1078,30 @@ void dshowMainFrame::ProcessEvent(char *data)
 		CommonData->EventTag = EventTag;
 		CommonData->EventEnergy = EventEnergy;
 	}
+//		try to get time correlations
+	if (EventTag == TAG_NEUTRON) {
+		dtM = (Recent[1].gTime - Recent[0].gTime) * NSPERCHAN / 1000.0;	// to us
+		dtN = (Recent[2].gTime - Recent[1].gTime) * NSPERCHAN / 1000.0;	// to us
+		if (dtN < Pars.tNeutronCapture)	{
+			if (dtM > Pars.tMesoDecay)  {	// Neutrino
+				CommonData->hNeutrinoEnergy[0]->Fill(Recent[1].Energy);
+				CommonData->hNeutrinoEnergy[1]->Fill(Recent[2].Energy);
+				CommonData->hCaptureTime->Fill(dtN);
+			} else if (dtM > 0 && dtM < Pars.tMesoDecay) {	// Mesoatom
+				CommonData->hMesoEnergy[0]->Fill(Recent[1].Energy);
+				CommonData->hMesoEnergy[1]->Fill(Recent[2].Energy);
+				CommonData->hMesoTime[0]->Fill(dtM);
+				CommonData->hMesoTime[1]->Fill(dtN);
+			}
+			Recent[0].gTime = -ONESECOND;
+			Recent[1].gTime = -ONESECOND;
+			Recent[2].gTime = -ONESECOND;
+		}
+	}
 }
 
 /*	Check event for veto/positron/neutron signature		*/
-void dshowMainFrame::CalculateTags(int cHits)
+void dshowMainFrame::CalculateTags(int cHits, long long gtime)
 {
 	float xsum, exsum, ysum, eysum, zsum;
 	int ncHits;
@@ -1009,6 +1119,9 @@ void dshowMainFrame::CalculateTags(int cHits)
 //	VETO
 	for (i=0; i<cHits; i++) if (CleanEvent[i].type == TYPE_VETO) {
 		EventTag = TAG_VETO;
+		Recent[0].gTime = gtime;
+		Recent[0].Energy = eall;
+		// don't fill vertex
 		return;
 	}
 //	Check for neutron
@@ -1061,6 +1174,14 @@ void dshowMainFrame::CalculateTags(int cHits)
 	if (ncHits >= Pars.nMin && eclust > Pars.eNMin && eclust < Pars.eNMax && eclust / eall > Pars.eNFraction) {
 		EventTag = TAG_NEUTRON;
 		EventEnergy = eclust;
+		Recent[2].Energy = eclust;
+		Recent[2].gTime = gtime;
+		Recent[2].Vertex[0] = xsum * WIDTH;
+		Recent[2].Vertex[1] = ysum * WIDTH;
+		Recent[2].Vertex[2] = zsum * THICK;
+		CommonData->hTagEnergy[1]->Fill(Recent[2].Energy);
+		CommonData->hTagXY[1]->Fill(Recent[2].Vertex[0], Recent[2].Vertex[1]);
+		CommonData->hTagZ[1]->Fill(Recent[2].Vertex[2]);
 		return;
 	}
 //		Check for pisitron
@@ -1072,16 +1193,52 @@ void dshowMainFrame::CalculateTags(int cHits)
 	}
 	ncHits = 0;
 	eclust = 0;
+	xsum = 0;
+	exsum = 0;
+	ysum = 0;
+	eysum = 0;
 	for (i=0; i<cHits; i++) if (CleanEvent[i].type == TYPE_SIPM && neighbors(CleanEvent[i].xy, CleanEvent[j].xy, CleanEvent[i].z, CleanEvent[j].z)) {
+		if (CleanEvent[i].z & 1) {	// X
+			exsum += CleanEvent[i].amp;
+			xsum += CleanEvent[i].amp * CleanEvent[i].xy;
+		} else {			// Y
+			eysum += CleanEvent[i].amp;
+			ysum += CleanEvent[i].amp * CleanEvent[i].xy;
+		}
+		zsum += CleanEvent[i].amp * CleanEvent[i].z;
+		
 		ncHits++;
 		eclust += CleanEvent[i].amp;
 	}
 	eclust /= SIPM2MEV;
 	E /= SIPM2MEV;
+	if (exsum > 0) {
+		xsum /= exsum;
+	} else {
+		xsum = -1;
+	}
+	if (eysum > 0) {
+		ysum /= eysum;
+	} else {
+		ysum = -1;
+	}
+	if (exsum + eysum > 0) {
+		zsum /= exsum + eysum;
+	} else {
+		zsum = -1;
+	}
 //		Implement criteria
 	if (E > Pars.eHitMin && ncHits <= Pars.nClustMax && eclust > Pars.ePosMin && eclust < Pars.ePosMax && eclust / eall > Pars.eNFraction) {
 		EventTag = TAG_POSITRON;
 		EventEnergy = eclust;
+		Recent[1].Energy = eclust;
+		Recent[1].gTime = gtime;
+		Recent[1].Vertex[0] = xsum * WIDTH;
+		Recent[1].Vertex[1] = ysum * WIDTH;
+		Recent[1].Vertex[2] = zsum * THICK;
+		CommonData->hTagEnergy[0]->Fill(Recent[1].Energy);
+		CommonData->hTagXY[0]->Fill(Recent[1].Vertex[0], Recent[1].Vertex[1]);
+		CommonData->hTagZ[0]->Fill(Recent[1].Vertex[2]);
 		return;		
 	}
 }
@@ -1149,6 +1306,41 @@ void dshowMainFrame::ResetSummaHists(void)
 		CommonData->hPMTsum[i]->Reset();
 		CommonData->hPMThits[i]->Reset();
 		CommonData->hSPRatio[i]->Reset();
+	}
+	TThread::UnLock();
+}
+
+void dshowMainFrame::ResetTagHists(void)
+{
+	int i;
+
+	TThread::Lock();
+	for (i=0; i<2; i++) {
+		CommonData->hTagEnergy[i]->Reset();
+		CommonData->hTagXY[i]->Reset();
+		CommonData->hTagZ[i]->Reset();
+	}
+	TThread::UnLock();
+}
+
+void dshowMainFrame::ResetNeutrinoHists(void)
+{
+	int i;
+
+	TThread::Lock();
+	for (i=0; i<2; i++) CommonData->hNeutrinoEnergy[i]->Reset();
+	CommonData->hCaptureTime->Reset();
+	TThread::UnLock();
+}
+
+void dshowMainFrame::ResetMuonHists(void)
+{
+	int i;
+
+	TThread::Lock();
+	for (i=0; i<2; i++) {
+		CommonData->hMesoEnergy[i]->Reset();
+		CommonData->hMesoTime[i]->Reset();
 	}
 	TThread::UnLock();
 }
@@ -1254,6 +1446,10 @@ void dshowMainFrame::ReadConfig(const char *fname)
 	Pars.rMax = (config_lookup_float(&cnf, "Dshow.rMax", &dtmp)) ? dtmp : 20.0;
 //	float rMax;
 	Pars.eNFraction = (config_lookup_float(&cnf, "Dshow.eNFraction", &dtmp)) ? dtmp : 0.8;
+//	tNeutronCapture = 50;	// neutron capture time, us
+	Pars.tNeutronCapture = (config_lookup_float(&cnf, "Dshow.tNeutronCapture", &dtmp)) ? dtmp : 50;
+//	tMesoDecay = 5;		// Meso atom decay time, us
+	Pars.tMesoDecay = (config_lookup_float(&cnf, "Dshow.tMesoDecay", &dtmp)) ? dtmp : 5;
 
 	config_destroy(&cnf);
 }
@@ -1299,7 +1495,7 @@ void *DataThreadFunction(void *ptr)
 	iNum = Main->nPlayBlocks->GetIntNumber();
 	Main->fStatusBar->SetText(f->GetName(), 5);
 	Main->PlayProgress->SetPosition(0);
-	fsize = 0x300000000L;
+	fsize = 0x300000000LL;
 	if (strstr(f->GetName(), ".bz2")) {
 		sprintf(cmd, "bzcat %s", f->GetName());
 		fIn = popen(cmd, "r");
@@ -1356,8 +1552,8 @@ void *DataThreadFunction(void *ptr)
 				rsize = 0;
 				Cnt = 0;
 			} else {
-				tm.tv_sec = 0;		// 0.1 s
-				tm.tv_usec = 100000;
+				tm.tv_sec = 0;		// 0.2 s
+				tm.tv_usec = 200000;
 				select(FD_SETSIZE, NULL, NULL, NULL, &tm);
 			}
 			continue;
@@ -1367,6 +1563,7 @@ void *DataThreadFunction(void *ptr)
 			CommonData->iError = 30;
 			break;
 		}
+
 		irc = fread(&buf[sizeof(int)], head->len - sizeof(int), 1, fIn);
 		if (irc != 1) {
 			CommonData->iError = 40;
@@ -1434,8 +1631,7 @@ float FindHalfTime(short int *data, int cnt, int amp)
 /*	the main						*/
 int main(int argc, char **argv) {
    	TApplication theApp("DANSS_SHOW", &argc, argv);
-   	dshowMainFrame *frame = new dshowMainFrame(gClient->GetRoot(), 2000, 1000);
-	frame->ReadConfig((argc > 1) ? argv[1] : DEFCONFIG);
+   	dshowMainFrame *frame = new dshowMainFrame(gClient->GetRoot(), 2000, 1000, (argc > 1) ? argv[1] : DEFCONFIG);
    	theApp.Run();
    	return 0;
 }

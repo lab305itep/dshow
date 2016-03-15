@@ -14,6 +14,7 @@
 #define RATELEN	1000
 //	A second in GTIME units 
 #define ONESECOND 125000000
+#define RATEPER	5
 //	Strip sizes in cm
 #define WIDTH	4.0
 #define THICK	1.0
@@ -47,6 +48,12 @@ struct evt_disp_struct {
 	char chan;
 };
 
+struct event_struct {
+	long long gTime;
+	float Energy;
+	float Vertex[3];
+};
+
 struct common_data_struct {
 	int iStop;		// flag our thread to stop;
 	int iError;		// thread error flag
@@ -70,6 +77,10 @@ struct common_data_struct {
 	TH1D *hTagEnergy[2];	// Computed enegry for tagged events
 	TH2D *hTagXY[2];	// XY-distribution for tagged events
 	TH1D *hTagZ[2];		// Z-distribution for tagged events
+	TH1D *hNeutrinoEnergy[2];	// Selected events positron and neutron energy
+	TH1D *hCaptureTime;	// Neutron decay time
+	TH1D *hMesoEnergy[2];	// Selected meso-events positron and neutron energy
+	TH1D *hMesoTime[2];	// Meso-events meso-decay and neutron capture time
 	int SummaSiPMThreshold;	// SiPM threshold for contribution in Summa histogramms
 	float SiPMWindow;	// SiPM window relative to the SiPM average time
 	TH1D *hRate;		// Rate
@@ -114,6 +125,9 @@ struct select_parm_struct {
 	float eNMax;
 	float rMax;
 	float eNFraction;
+//	Time windows
+	float tNeutronCapture;	// neutron capture time, us
+	float tMesoDecay;		// Meso atom decay time, us
 };
 
 void *DataThreadFunction(void *ptr);
@@ -129,6 +143,7 @@ private:
 	int EventTag;
 	float EventEnergy;
 	struct select_parm_struct Pars;
+	struct event_struct Recent[3];	// Recent VETO, POSITRON and NEUTRON-like events correspondingly
 	
 	TThread *DataThread;
 	TGStatusBar *fStatusBar;
@@ -177,7 +192,12 @@ private:
 //		Rate tab
 	TRootEmbeddedCanvas *fRateCanvas;
 //		Tagged tab
-	TRootEmbeddedCanvas *fTagCanvas;	
+	TRootEmbeddedCanvas *fTagCanvas;
+//		Neutrino tab
+	TRootEmbeddedCanvas *fNeutrinoCanvas;
+//		Muon tab
+	TRootEmbeddedCanvas *fMuonCanvas;	
+	
 //		Right buttons
 	TGCheckButton *Pause;
 	TGNumberEntry *nRefresh;
@@ -198,11 +218,14 @@ private:
 	void CreateSummaTab(TGTab *tab);
 	void CreateRateTab(TGTab *tab);
 	void CreateTagTab(TGTab *tab);
+	void CreateNeutrinoTab(TGTab *tab);
+	void CreateMuonTab(TGTab *tab);
 	void DrawEvent(TCanvas *cv);
-	void CalculateTags(int nHits);
+	void CalculateTags(int nHits, long long gtime);
 	int neighbors(int xy1, int xy2, int z1, int z2);
+	void ReadConfig(const char *fname);
 public:
-   	dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h);
+   	dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h, const char *cfgname);
    	virtual ~dshowMainFrame(void);
 	virtual void CloseWindow(void);
    	void DoDraw(void);
@@ -211,12 +234,13 @@ public:
 	void ResetTimeHists(void);
 	void ResetSummaHists(void);
 	void ResetTagHists(void);
+	void ResetNeutrinoHists(void);
+	void ResetMuonHists(void);
 	void ChangeTimeBThr(void);
 	void ChangeSummaPars(void);
 	void OnTimer(void);
 	void PlayFileDialog(void);
 	void PlayFileStop(void);
-	void ReadConfig(const char *fname);
 	friend void *DataThreadFunction(void *ptr);
 	ClassDef(dshowMainFrame, 0)
 };
