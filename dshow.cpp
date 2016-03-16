@@ -177,13 +177,13 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h, const char
 	hframe->AddFrame(tab, new TGLayoutHints(kLHintsExpandX | kLHintsExpandY, 5, 5, 3, 4));
 	
    	TGVerticalFrame *vframe=new TGVerticalFrame(hframe, 50, h);
+
 	Pause = new TGCheckButton(vframe,"&Pause");
    	vframe->AddFrame(Pause, new TGLayoutHints(kLHintsCenterX | kLHintsTop, 5, 5, 3, 4));
 
 	lb = new TGLabel(vframe, "Refresh, s");
    	vframe->AddFrame(lb, new TGLayoutHints(kLHintsLeft | kLHintsTop, 5, 5, 3, 4));		
-	nRefresh = new TGNumberEntry(vframe, 1, 2, -1, TGNumberFormat::kNESInteger, TGNumberFormat::kNEANonNegative, 
-		TGNumberFormat::kNELLimitMinMax, 1, 100);
+	nRefresh = new TGNumberEntry(vframe, 1, 2, -1, TGNumberFormat::kNESInteger, TGNumberFormat::kNEANonNegative, TGNumberFormat::kNELLimitMinMax, 1, 100);
    	vframe->AddFrame(nRefresh, new TGLayoutHints(kLHintsCenterX | kLHintsTop, 5, 5, 3, 4));	
 
 	lb = new TGLabel(vframe, "WFD:");
@@ -226,15 +226,18 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h, const char
 	FileProgress->SetRange(0.0, 100.0);
 	grPlay->AddFrame(FileProgress, new TGLayoutHints(kLHintsExpandX  | kLHintsTop, 5, 5, 3, 1));
 
-   	vframe->AddFrame(grPlay, new TGLayoutHints(kLHintsCenterX  | kLHintsTop, 5, 5, 3, 4));
+	Follow = new TGCheckButton(grPlay,"&Follow");
+   	grPlay->AddFrame(Follow, new TGLayoutHints(kLHintsCenterX | kLHintsTop, 5, 5, 3, 4));
 
-   	TGTextButton *reset = new TGTextButton(vframe,"&Reset");
-	reset->Connect("Clicked()", "dshowMainFrame", this, "Reset()");
-   	vframe->AddFrame(reset, new TGLayoutHints(kLHintsCenterX | kLHintsBottom, 5, 5, 3, 4));
+   	vframe->AddFrame(grPlay, new TGLayoutHints(kLHintsCenterX  | kLHintsTop, 5, 5, 3, 4));
 
    	TGTextButton *exit = new TGTextButton(vframe,"&Exit ");
 	exit->Connect("Clicked()", "dshowMainFrame", this, "SendCloseMessage()");
    	vframe->AddFrame(exit, new TGLayoutHints(kLHintsCenterX | kLHintsBottom, 5, 5, 10, 4));
+
+   	TGTextButton *reset = new TGTextButton(vframe,"&Reset");
+	reset->Connect("Clicked()", "dshowMainFrame", this, "Reset()");
+   	vframe->AddFrame(reset, new TGLayoutHints(kLHintsCenterX | kLHintsBottom, 5, 5, 3, 4));
 
 	hframe->AddFrame(vframe, new TGLayoutHints(kLHintsRight | kLHintsExpandY, 5, 5, 3, 4));
 
@@ -1485,6 +1488,79 @@ int dshowMainFrame::neighbors(int xy1, int xy2, int z1, int z2)
 	return 0;
 }
 
+/*	Read one record							*/
+/*	Return 1 if OK, negative on error, 0 on the EOF			*/
+/*	If iFollow wait till full record and doesn't retirn on EOF,	*/
+/*	otherwise partial record will produce an error.			*/
+/*	Watch for iStop. 						*/
+int GetRecord(char *buf, int buf_size, FILE *f, int iFollow, int *iStop)
+{
+	int Cnt;
+	int irc;
+	int len;
+	struct timeval tm;
+//		Read length
+	Cnt = 0;
+	while (!(*iStop) && Cnt < sizeof(int)) {
+		irc = fread(&buf[Cnt], 1, sizeof(int) - Cnt, f);
+		if (irc < 0) return irc;	// Error
+		Cnt += irc;
+		if (Cnt < sizeof(int) && iFollow) {
+			tm.tv_sec = 0;		// do some sleep and try to get more data
+			tm.tv_usec = 200000;
+			select(FD_SETSIZE, NULL, NULL, NULL, &tm);			
+			continue;
+		}
+		if (!Cnt) return 0;		// EOF
+		if (Cnt != sizeof(int)) return -1;	// Strange amount read
+	}
+
+	len = *((int *)buf);
+	if (len < sizeof(int) || len > buf_size) return -2;	// strange length
+
+//		Read the rest
+	while (!(*iStop) && Cnt < len) {
+		irc = fread(&buf[Cnt], 1, len - Cnt, f);
+		if (irc < 0) return irc;	// Error
+		Cnt += irc;
+		if (Cnt < len && iFollow) {
+			tm.tv_sec = 0;		// do some sleep and try to get more data
+			tm.tv_usec = 200000;
+			select(FD_SETSIZE, NULL, NULL, NULL, &tm);			
+			continue;
+		}
+		if (Cnt != len) return -3;	// Strange amount read
+	}
+	return 1;
+}
+
+/*	Open data file either directly or via zcat etc, depending on the extension	*/
+/*	Return some large length (12G) on compressed files				*/
+FILE* OpenDataFile(const char *fname, off_t *size) {
+	char cmd[1024];
+	FILE *f;
+
+	*size = 0x300000000LL;
+	if (strstr(fname, ".bz2")) {
+		sprintf(cmd, "bzcat %s", fname);
+		f = popen(cmd, "r");
+	} else if (strstr(fname, ".gz")) {
+		sprintf(cmd, "zcat %s", fname);
+		f = popen(cmd, "r");
+	} else if (strstr(fname, ".xz")) {
+		sprintf(cmd, "xzcat %s", fname);
+		f = popen(cmd, "r");
+	} else {
+		f = fopen(fname, "rb");
+		if (f) {
+			fseek(f, 0, SEEK_END);
+			*size = ftello(f);
+			fseek(f, 0, SEEK_SET);
+		}
+	}
+	return f;
+}
+
 /*	Data analysis thread				*/
 void *DataThreadFunction(void *ptr)
 {
@@ -1494,16 +1570,15 @@ void *DataThreadFunction(void *ptr)
 	struct rec_header_struct *head;
 	int irc;
 	int mod, chan;
-	struct timeval tm;
 	FILE *fIn;
 	off_t fsize;
 	off_t rsize;
 	int iNum;
 	int Cnt;
 	TObject *f;
-	char cmd[1024];
 	int FileCnt;
 	int nFiles;
+	char str[256];
 	
 	Main = (dshowMainFrame *)ptr;
 	CommonData = Main->CommonData;
@@ -1517,87 +1592,46 @@ void *DataThreadFunction(void *ptr)
 	head = (struct rec_header_struct *) buf;
 	
 	f = Main->PlayFile->fFileNamesList->First();
+	fIn = OpenDataFile(f->GetName(), &fsize);
+	if (!fIn) {
+		CommonData->iError = 15;
+		goto Ret;
+	}
 	iNum = Main->nPlayBlocks->GetIntNumber();
-	Main->fStatusBar->SetText(f->GetName(), 5);
+	FileCnt = 0;
+	nFiles = Main->PlayFile->fFileNamesList->GetEntries();
 	Main->PlayProgress->SetPosition(0);
 	Main->FileProgress->SetPosition(0);
-	fsize = 0x300000000LL;
-	FileCnt = 1;
-	nFiles = Main->PlayFile->fFileNamesList->GetEntries();
-	if (strstr(f->GetName(), ".bz2")) {
-		sprintf(cmd, "bzcat %s", f->GetName());
-		fIn = popen(cmd, "r");
-		if (!fIn) {
-			CommonData->iError = 12;
-			goto Ret;
-		}
-	} else if (strstr(f->GetName(), ".gz")) {
-		sprintf(cmd, "zcat %s", f->GetName());
-		fIn = popen(cmd, "r");
-		if (!fIn) {
-			CommonData->iError = 13;
-			goto Ret;
-		}
-	} else if (strstr(f->GetName(), ".xz")) {
-		sprintf(cmd, "xzcat %s", f->GetName());
-		fIn = popen(cmd, "r");
-		if (!fIn) {
-			CommonData->iError = 14;
-			goto Ret;
-		}
-	} else {
-		fIn = fopen(f->GetName(), "rb");
-		if (!fIn) {
-			CommonData->iError = 15;
-			goto Ret;
-		}
-		fseek(fIn, 0, SEEK_END);
-		fsize = ftello(fIn);
-		fseek(fIn, 0, SEEK_SET);
-	}
+	snprintf(str, sizeof(str), "%s (%d/%d)", f->GetName(), FileCnt + 1, nFiles);
+	Main->fStatusBar->SetText(str, 5);
 	rsize = 0;
 	Cnt = 0;
 	
 	while (!CommonData->iStop) {
-		irc = fread(buf, sizeof(int), 1, fIn);
-		if (irc < 0 || irc > 1) {
-			CommonData->iError = 20;
+		irc = GetRecord(buf, BSIZE, fIn, Main->Follow->IsDown(), &CommonData->iStop);
+		if (irc < 0) {
+			CommonData->iError = -irc;
 			break;
 		} else if (irc == 0) {
 			//	check if we have file after
+			FileCnt++;
+			Main->PlayProgress->SetPosition(0);
+			Main->FileProgress->SetPosition(FileCnt * 100.0 / nFiles);
 			if (Main->PlayFile->fFileNamesList->After(f)) {
 				f = Main->PlayFile->fFileNamesList->After(f);
-				Main->fStatusBar->SetText(f->GetName(), 5);
-				Main->PlayProgress->SetPosition(0);
-				FileCnt++;
-				Main->FileProgress->SetPosition(FileCnt * 100 / nFiles);
-				fIn = fopen(f->GetName(), "rb");
+				snprintf(str, sizeof(str), "%s (%d/%d)", f->GetName(), FileCnt + 1, nFiles);
+				Main->fStatusBar->SetText(str, 5);
+				fIn = OpenDataFile(f->GetName(), &fsize);
 				if (!fIn) {
 					CommonData->iError = 25;
 					goto Ret;
 				}
-				fseek(fIn, 0, SEEK_END);
-				fsize = ftello(fIn);
-				fseek(fIn, 0, SEEK_SET);
 				rsize = 0;
 				Cnt = 0;
+				continue;
 			} else {
-				tm.tv_sec = 0;		// 0.2 s
-				tm.tv_usec = 200000;
-				select(FD_SETSIZE, NULL, NULL, NULL, &tm);
+				break;
 			}
-			continue;
-		}
-
-		if (head->len > BSIZE || head->len < sizeof(int)) {
-			CommonData->iError = 30;
-			break;
-		}
-
-		irc = fread(&buf[sizeof(int)], head->len - sizeof(int), 1, fIn);
-		if (irc != 1) {
-			CommonData->iError = 40;
-			break;
 		}
 		rsize += head->len;
 		
@@ -1629,7 +1663,8 @@ void *DataThreadFunction(void *ptr)
 			if (iNum > 0) sleep(1);
 			iNum = Main->nPlayBlocks->GetIntNumber();
 			if (fsize) Main->PlayProgress->SetPosition(100.0*rsize/fsize);
-			Main->fStatusBar->SetText(f->GetName(), 5);
+			snprintf(str, sizeof(str), "%s (%d/%d)", f->GetName(), FileCnt + 1, nFiles);
+			Main->fStatusBar->SetText(str, 5);
 			Cnt = 0;
 		}	
 	}

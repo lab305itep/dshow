@@ -208,6 +208,7 @@ private:
 	TGNumberEntry *nPlayBlocks;
 	TGHProgressBar *PlayProgress;
 	TGHProgressBar *FileProgress;
+	TGCheckButton *Follow;
 
 	int TimerCnt;
 	void ProcessEvent(char *data);
