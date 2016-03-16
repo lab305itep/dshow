@@ -120,6 +120,7 @@ struct select_parm_struct {
 	float ePosFraction;
 	int nClustMax;
 //	Neutron cuts
+	float nHitMin;
 	int nMin;
 	float eNMin;
 	float eNMax;
@@ -206,6 +207,7 @@ private:
 	TGFileInfo *PlayFile;
 	TGNumberEntry *nPlayBlocks;
 	TGHProgressBar *PlayProgress;
+	TGHProgressBar *FileProgress;
 
 	int TimerCnt;
 	void ProcessEvent(char *data);
@@ -229,6 +231,7 @@ public:
    	virtual ~dshowMainFrame(void);
 	virtual void CloseWindow(void);
    	void DoDraw(void);
+	void Reset(void);
 	void ResetSelfHists(void);
 	void ResetSpectrumHists(void);
 	void ResetTimeHists(void);

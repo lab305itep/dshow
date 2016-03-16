@@ -220,11 +220,21 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h, const char
 	PlayProgress->SetRange(0.0, 100.0);
 	grPlay->AddFrame(PlayProgress, new TGLayoutHints(kLHintsExpandX  | kLHintsTop, 5, 5, 3, 1));
 
+	FileProgress = new TGHProgressBar(grPlay, TGProgressBar::kStandard, 100);
+	FileProgress->ShowPosition();
+	FileProgress->SetBarColor("blue");
+	FileProgress->SetRange(0.0, 100.0);
+	grPlay->AddFrame(FileProgress, new TGLayoutHints(kLHintsExpandX  | kLHintsTop, 5, 5, 3, 1));
+
    	vframe->AddFrame(grPlay, new TGLayoutHints(kLHintsCenterX  | kLHintsTop, 5, 5, 3, 4));
+
+   	TGTextButton *reset = new TGTextButton(vframe,"&Reset");
+	reset->Connect("Clicked()", "dshowMainFrame", this, "Reset()");
+   	vframe->AddFrame(reset, new TGLayoutHints(kLHintsCenterX | kLHintsBottom, 5, 5, 3, 4));
 
    	TGTextButton *exit = new TGTextButton(vframe,"&Exit ");
 	exit->Connect("Clicked()", "dshowMainFrame", this, "SendCloseMessage()");
-   	vframe->AddFrame(exit, new TGLayoutHints(kLHintsCenterX | kLHintsBottom, 5, 5, 3, 4));
+   	vframe->AddFrame(exit, new TGLayoutHints(kLHintsCenterX | kLHintsBottom, 5, 5, 10, 4));
 
 	hframe->AddFrame(vframe, new TGLayoutHints(kLHintsRight | kLHintsExpandY, 5, 5, 3, 4));
 
@@ -1132,7 +1142,7 @@ void dshowMainFrame::CalculateTags(int cHits, long long gtime)
 	ysum = 0;
 	eysum = 0;
 	
-	for (i=0; i<cHits; i++) if (CleanEvent[i].type == TYPE_SIPM && CleanEvent[i].amp > Pars.eHitMin * SIPM2MEV) {
+	for (i=0; i<cHits; i++) if (CleanEvent[i].type == TYPE_SIPM && CleanEvent[i].amp > Pars.nHitMin * SIPM2MEV) {
 		if (CleanEvent[i].z & 1) {	// X
 			exsum += CleanEvent[i].amp;
 			xsum += CleanEvent[i].amp * CleanEvent[i].xy;
@@ -1167,7 +1177,7 @@ void dshowMainFrame::CalculateTags(int cHits, long long gtime)
 			if (r2 > Pars.rMax * Pars.rMax) continue;
 		}
 		eclust += CleanEvent[i].amp;
-		if (CleanEvent[i].amp > Pars.eHitMin * SIPM2MEV) ncHits++;
+		if (CleanEvent[i].amp > Pars.nHitMin * SIPM2MEV) ncHits++;
 	}
 	eclust /= SIPM2MEV;
 //		Implement criteria
@@ -1264,6 +1274,17 @@ void dshowMainFrame::ProcessSelfTrig(int mod, int chan, struct hw_rec_struct_sel
 }
 
 /*	Reset histogramms				*/
+void dshowMainFrame::Reset(void)
+{
+	ResetSelfHists();
+	ResetSpectrumHists();
+	ResetTimeHists();
+	ResetSummaHists();
+	ResetTagHists();
+	ResetNeutrinoHists();
+	ResetMuonHists();
+}
+
 void dshowMainFrame::ResetSelfHists(void)
 {
 	int i;
@@ -1436,6 +1457,8 @@ void dshowMainFrame::ReadConfig(const char *fname)
 //	int nClustMax;
 	Pars.nClustMax = (config_lookup_int(&cnf, "Dshow.nClustMax", &tmp)) ? tmp : 4;
 //	Neutron cuts
+//	float nHitMin;
+	Pars.nHitMin = (config_lookup_float(&cnf, "Dshow.nHitMin", &dtmp)) ? dtmp : 0.4;
 //	int nMin;
 	Pars.nMin = (config_lookup_int(&cnf, "Dshow.nMin", &tmp)) ? tmp : 5;
 //	float eNMin;
@@ -1479,6 +1502,8 @@ void *DataThreadFunction(void *ptr)
 	int Cnt;
 	TObject *f;
 	char cmd[1024];
+	int FileCnt;
+	int nFiles;
 	
 	Main = (dshowMainFrame *)ptr;
 	CommonData = Main->CommonData;
@@ -1495,7 +1520,10 @@ void *DataThreadFunction(void *ptr)
 	iNum = Main->nPlayBlocks->GetIntNumber();
 	Main->fStatusBar->SetText(f->GetName(), 5);
 	Main->PlayProgress->SetPosition(0);
+	Main->FileProgress->SetPosition(0);
 	fsize = 0x300000000LL;
+	FileCnt = 1;
+	nFiles = Main->PlayFile->fFileNamesList->GetEntries();
 	if (strstr(f->GetName(), ".bz2")) {
 		sprintf(cmd, "bzcat %s", f->GetName());
 		fIn = popen(cmd, "r");
@@ -1541,6 +1569,8 @@ void *DataThreadFunction(void *ptr)
 				f = Main->PlayFile->fFileNamesList->After(f);
 				Main->fStatusBar->SetText(f->GetName(), 5);
 				Main->PlayProgress->SetPosition(0);
+				FileCnt++;
+				Main->FileProgress->SetPosition(FileCnt * 100 / nFiles);
 				fIn = fopen(f->GetName(), "rb");
 				if (!fIn) {
 					CommonData->iError = 25;
