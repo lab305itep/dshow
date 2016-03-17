@@ -148,12 +148,13 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h, const char
 //	Neutrino events
 	CommonData->hNeutrinoEnergy[0] = new TH1D("hEPositronN", "Energy distribution of positrons in neutrino-like events;MeV", 100, 0, 10);
 	CommonData->hNeutrinoEnergy[1] = new TH1D("hENeutronN", "Energy distribution of neutron capture in neutrino-like events;MeV", 100, 0, 10);
-	CommonData->hCaptureTime = new TH1D("hCaptureTime", "Time distribution of neutron capture in neutrino-like events;us", 100, 0, 50);
+	CommonData->hCaptureTime = new TH1D("hCaptureTime", "Time distribution of neutron capture in neutrino-like events;us", 25, 0, 50);
+	CommonData->hNeutronPath = new TH1D("hNeutronPath", "Distance from positron cluster to neutron cluster;cm", 50, 0, 100);
 //	Muon capture events
 	CommonData->hMesoEnergy[0] = new TH1D("hEPositronM", "Energy distribution of positrons in mesoatom-like events;MeV", 100, 0, 10);
 	CommonData->hMesoEnergy[1] = new TH1D("hENeutronM", "Energy distribution of neutron capture in mesoatom-like events;MeV", 100, 0, 10);
-	CommonData->hMesoTime[0] = new TH1D("hMesoTime", "Time distribution of mesoatom decay in mesoatom-like events;us", 100, 0, 5);
-	CommonData->hMesoTime[1] = new TH1D("hCaptureTimeM", "Time distribution of neutron capture in mesoatom-like events;us", 100, 0, 50);
+	CommonData->hMesoTime[0] = new TH1D("hMesoTime", "Time distribution of mesoatom decay in mesoatom-like events;us", 25, 0, 5);
+	CommonData->hMesoTime[1] = new TH1D("hCaptureTimeM", "Time distribution of neutron capture in mesoatom-like events;us", 25, 0, 50);
 
 	PlayFile = new TGFileInfo();
 	PlayFile->fFileTypes = DataFileTypes;
@@ -376,7 +377,7 @@ void dshowMainFrame::CreateTimeTab(TGTab *tab)
 	TGLabel *lb = new TGLabel(hframe, "Threshold:");
    	hframe->AddFrame(lb, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));		
 	nTimeBThreshold = new TGNumberEntry(hframe, 0, 5, -1, TGNumberFormat::kNESInteger, TGNumberFormat::kNEANonNegative);
-	CommonData->TimeBThreshold = 100;
+	CommonData->TimeBThreshold = 50;
 	nTimeBThreshold->SetIntNumber(CommonData->TimeBThreshold);
 	nTimeBThreshold->Connect("ValueSet(Long_t)", "dshowMainFrame", this, "ChangeTimeBThr()");
    	hframe->AddFrame(nTimeBThreshold, new TGLayoutHints(kLHintsLeft  | kLHintsCenterY, 5, 5, 3, 4));
@@ -384,7 +385,7 @@ void dshowMainFrame::CreateTimeTab(TGTab *tab)
 	lb = new TGLabel(hframe, "SiPM +- Time window, ns:");
    	hframe->AddFrame(lb, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 15, 5, 3, 4));
 	nSiPMWindow = new TGNumberEntry(hframe, 0, 5, -1, TGNumberFormat::kNESRealTwo, TGNumberFormat::kNEANonNegative);
-	CommonData->SiPMWindow = 10;	// ns
+	CommonData->SiPMWindow = 20;	// ns
 	nSiPMWindow->SetNumber(CommonData->SiPMWindow);
 	nSiPMWindow->Connect("ValueSet(Long_t)", "dshowMainFrame", this, "ChangeSummaPars()");
    	hframe->AddFrame(nSiPMWindow, new TGLayoutHints(kLHintsLeft  | kLHintsCenterY, 5, 5, 3, 4));
@@ -739,13 +740,15 @@ void dshowMainFrame::DoDraw(void)
    	fCanvas = fNeutrinoCanvas->GetCanvas();
    	fCanvas->cd();
 	fCanvas->Clear();
-	fCanvas->Divide(3);
+	fCanvas->Divide(2,2);
 	fCanvas->cd(1);
 	CommonData->hNeutrinoEnergy[0]->Draw();
 	fCanvas->cd(2);
 	CommonData->hNeutrinoEnergy[1]->Draw();
 	fCanvas->cd(3);
 	CommonData->hCaptureTime->Draw();
+	fCanvas->cd(4);
+	CommonData->hNeutronPath->Draw();
    	fCanvas->Update();
 
 /*		Mesoatom events			*/
@@ -910,7 +913,7 @@ void dshowMainFrame::ProcessEvent(char *data)
 	int gTrig;
 	int nHits;
 	int cHits;
-	float dtM, dtN;
+	float dtM, dtN, dr;
 
 	sumPMT = 0;
 	sumSiPM = 0;
@@ -1104,7 +1107,10 @@ void dshowMainFrame::ProcessEvent(char *data)
 	if (EventTag == TAG_NEUTRON) {
 		dtM = (Recent[1].gTime - Recent[0].gTime) * NSPERCHAN / 1000.0;	// to us
 		dtN = (Recent[2].gTime - Recent[1].gTime) * NSPERCHAN / 1000.0;	// to us
-		if (dtN < Pars.tNeutronCapture)	{
+		dr = 0;
+		for (i=0; i<3; i++) if (Recent[2].Vertex[i] >= 0 && Recent[1].Vertex[i] >= 0) dr += (Recent[2].Vertex[i] - Recent[1].Vertex[i]) * (Recent[2].Vertex[i] - Recent[1].Vertex[i]);
+		dr = sqrt(dr);
+		if (dtN < Pars.tNeutronCapture && dr < Pars.NeutronPath) {
 			if (dtM > Pars.tMesoDecay)  {	// Neutrino
 				CommonData->hNeutrinoEnergy[0]->Fill(Recent[1].Energy);
 				CommonData->hNeutrinoEnergy[1]->Fill(Recent[2].Energy);
@@ -1115,6 +1121,7 @@ void dshowMainFrame::ProcessEvent(char *data)
 				CommonData->hMesoTime[0]->Fill(dtM);
 				CommonData->hMesoTime[1]->Fill(dtN);
 			}
+			CommonData->hNeutronPath->Fill(dr);
 			Recent[0].gTime = -ONESECOND;
 			Recent[1].gTime = -ONESECOND;
 			Recent[2].gTime = -ONESECOND;
@@ -1379,6 +1386,7 @@ void dshowMainFrame::ResetNeutrinoHists(void)
 	TThread::Lock();
 	for (i=0; i<2; i++) CommonData->hNeutrinoEnergy[i]->Reset();
 	CommonData->hCaptureTime->Reset();
+	CommonData->hNeutronPath->Reset();
 	TThread::UnLock();
 }
 
@@ -1501,6 +1509,8 @@ void dshowMainFrame::ReadConfig(const char *fname)
 	Pars.tNeutronCapture = (config_lookup_float(&cnf, "Dshow.tNeutronCapture", &dtmp)) ? dtmp : 50;
 //	tMesoDecay = 5;		// Meso atom decay time, us
 	Pars.tMesoDecay = (config_lookup_float(&cnf, "Dshow.tMesoDecay", &dtmp)) ? dtmp : 5;
+//	NeutronPath = 30;		// Meso atom decay time, us
+	Pars.NeutronPath = (config_lookup_float(&cnf, "Dshow.NeutronPath", &dtmp)) ? dtmp : 30;
 
 	config_destroy(&cnf);
 }

@@ -79,6 +79,7 @@ struct common_data_struct {
 	TH1D *hTagZ[2];		// Z-distribution for tagged events
 	TH1D *hNeutrinoEnergy[2];	// Selected events positron and neutron energy
 	TH1D *hCaptureTime;	// Neutron decay time
+	TH1D *hNeutronPath;	// distance from positron to neutron
 	TH1D *hMesoEnergy[2];	// Selected meso-events positron and neutron energy
 	TH1D *hMesoTime[2];	// Meso-events meso-decay and neutron capture time
 	TH1D *hCuts;		// Cut criteria
@@ -145,6 +146,7 @@ struct select_parm_struct {
 //	Time windows
 	float tNeutronCapture;	// neutron capture time, us
 	float tMesoDecay;		// Meso atom decay time, us
+	float NeutronPath;
 };
 
 void *DataThreadFunction(void *ptr);
