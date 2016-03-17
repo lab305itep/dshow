@@ -81,6 +81,7 @@ struct common_data_struct {
 	TH1D *hCaptureTime;	// Neutron decay time
 	TH1D *hMesoEnergy[2];	// Selected meso-events positron and neutron energy
 	TH1D *hMesoTime[2];	// Meso-events meso-decay and neutron capture time
+	TH1D *hCuts;		// Cut criteria
 	int SummaSiPMThreshold;	// SiPM threshold for contribution in Summa histogramms
 	float SiPMWindow;	// SiPM window relative to the SiPM average time
 	TH1D *hRate;		// Rate
@@ -111,6 +112,21 @@ struct channel_struct {
 #define TAG_VETO	1
 #define TAG_POSITRON	2
 #define TAG_NEUTRON	3
+
+#define CUT_NONE	0.5
+#define CUT_VETO	1.5
+#define CUT_POSITRON	2.5
+#define CUT_NEUTRON	3.5
+#define CUT_NOSITIME	4.5
+#define CUT_NONX	5.5
+#define CUT_NONY	6.5
+#define CUT_NONZ	7.5
+#define CUT_NMULT	8.5
+#define CUT_NENERGY	9.5
+#define CUT_NFRACTION	10.5
+#define CUT_PMULT	11.5
+#define CUT_PENERGY	12.5
+#define CUT_PFRACTION	13.5
 
 struct select_parm_struct {
 //	Positron cuts

@@ -45,6 +45,7 @@
 
 const char *DataFileTypes[] = {"Data files", "*.dat*", "All files", "*", 0, 0};
 const char *RateName[] = {"All", "NO veto"};
+const char *CutName[] = {"NONE", "VETO", "POSITRON", "NEUTRON", "NOSITIME", "NONX", "NONY", "NONZ", "NMULT", "NENERGY", "NFRACT", "PMULT", "PENERGY", "PFRACT"};
 
 /*	Class dshowMainFrame - the main window		*/
 /*	Main window Constructor				*/
@@ -57,7 +58,7 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h, const char
    	Double_t RGB_g[]    = {0., 0.0, 0.0, 1.0, 1.0};
    	Double_t RGB_b[]    = {0., 1.0, 0.0, 0.0, 1.0};
    	Double_t RGB_stop[] = {0., .25, .50, .75, 1.0};
-	int i;
+	int i, n;
 	TGLabel *lb;
 	
 	ReadConfig(cfgname);
@@ -120,10 +121,14 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h, const char
 	CommonData->hSPRatio[1] = new TH1D("hSPRatio1", "SiPM to PMT ratio, no veto", 100, 0, 5.0);
 	CommonData->hSPRatio[1]->SetLineColor(kBlue);
 //	TLegend
-	SummaLegend = new TLegend(0.6, 0.1, 0.9, 0.3);
+	SummaLegend = new TLegend(0.6, 0.75, 0.9, 0.9);
 	SummaLegend->AddEntry(CommonData->hSiPMsum[0], "All events", "L");
 	SummaLegend->AddEntry(CommonData->hSiPMsum[1], "NO veto", "L");
 	SummaLegend->SetFillColor(kWhite);
+//	Cuts
+	n = sizeof(CutName) / sizeof(CutName[0]);
+	CommonData->hCuts = new TH1D("hCuts", "Various cuts", n, 0, n);
+	for (i=0; i<n; i++) CommonData->hCuts->GetXaxis()->SetBinLabel(i+1, CutName[i]);
 //	Taged events distributions
 	CommonData->hTagEnergy[0] = new TH1D("hEPositron", "Energy distribution of positron-like events;MeV", 100, 0, 10);
 	CommonData->hTagEnergy[1] = new TH1D("hENeutron", "Energy distribution of neutron-like events;MeV", 100, 0, 10);
@@ -147,7 +152,7 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h, const char
 //	Muon capture events
 	CommonData->hMesoEnergy[0] = new TH1D("hEPositronM", "Energy distribution of positrons in mesoatom-like events;MeV", 100, 0, 10);
 	CommonData->hMesoEnergy[1] = new TH1D("hENeutronM", "Energy distribution of neutron capture in mesoatom-like events;MeV", 100, 0, 10);
-	CommonData->hMesoTime[0] = new TH1D("hMesoTime", "Time distribution of mesoatom decay in mesoatom-like events;us", 100, 0, 50);
+	CommonData->hMesoTime[0] = new TH1D("hMesoTime", "Time distribution of mesoatom decay in mesoatom-like events;us", 100, 0, 5);
 	CommonData->hMesoTime[1] = new TH1D("hCaptureTimeM", "Time distribution of neutron capture in mesoatom-like events;us", 100, 0, 50);
 
 	PlayFile = new TGFileInfo();
@@ -695,8 +700,10 @@ void dshowMainFrame::DoDraw(void)
 	CommonData->hSPRatio[0]->Draw();
 	CommonData->hSPRatio[1]->Draw("same");
 //	TLegend
-   	fCanvas->cd(6);
 	SummaLegend->Draw();	
+//	cuts
+   	fCanvas->cd(6);
+	CommonData->hCuts->Draw();
    	fCanvas->Update();
    	
 /*		Rates				*/
@@ -1017,6 +1024,8 @@ void dshowMainFrame::ProcessEvent(char *data)
 	if (nat) {
 		at /= nat;
 		if (nat > 1) for (i = 0; i<nHits; i++) if (Event[i].amp > CommonData->TimeBThreshold) CommonData->hTimeC[Event[i].mod - 1]->Fill((double) Event[i].chan, Event[i].time - at);
+	} else {
+		CommonData->hCuts->Fill(CUT_NOSITIME);
 	}
 //		Clean the event
 	if (CleanLength < EventLength) {
@@ -1135,6 +1144,7 @@ void dshowMainFrame::CalculateTags(int cHits, long long gtime)
 		Recent[0].gTime = gtime;
 		Recent[0].Energy = eall;
 		// don't fill vertex
+		CommonData->hCuts->Fill(CUT_VETO);
 		return;
 	}
 //	Check for neutron
@@ -1144,6 +1154,7 @@ void dshowMainFrame::CalculateTags(int cHits, long long gtime)
 	exsum = 0;
 	ysum = 0;
 	eysum = 0;
+	zsum = 0;
 	
 	for (i=0; i<cHits; i++) if (CleanEvent[i].type == TYPE_SIPM && CleanEvent[i].amp > Pars.nHitMin * SIPM2MEV) {
 		if (CleanEvent[i].z & 1) {	// X
@@ -1159,16 +1170,19 @@ void dshowMainFrame::CalculateTags(int cHits, long long gtime)
 		xsum /= exsum;
 	} else {
 		xsum = -1;
+		CommonData->hCuts->Fill(CUT_NONX);
 	}
 	if (eysum > 0) {
 		ysum /= eysum;
 	} else {
 		ysum = -1;
+		CommonData->hCuts->Fill(CUT_NONY);
 	}
 	if (exsum + eysum > 0) {
 		zsum /= exsum + eysum;
 	} else {
 		zsum = -1;
+		CommonData->hCuts->Fill(CUT_NONZ);
 	}
 //		Count clusters and neutron energy
 	ncHits = 0;
@@ -1195,8 +1209,13 @@ void dshowMainFrame::CalculateTags(int cHits, long long gtime)
 		CommonData->hTagEnergy[1]->Fill(Recent[2].Energy);
 		CommonData->hTagXY[1]->Fill(Recent[2].Vertex[0], Recent[2].Vertex[1]);
 		CommonData->hTagZ[1]->Fill(Recent[2].Vertex[2]);
+		CommonData->hCuts->Fill(CUT_NEUTRON);
 		return;
 	}
+	if (ncHits < Pars.nMin) CommonData->hCuts->Fill(CUT_NMULT);
+	if (eclust <= Pars.eNMin || eclust >= Pars.eNMax) CommonData->hCuts->Fill(CUT_NENERGY);
+	if (eclust / eall <= Pars.eNFraction) CommonData->hCuts->Fill(CUT_NFRACTION);
+	
 //		Check for pisitron
 //		Find consequtive cluster near EMAX strip
 	E = 0;
@@ -1241,7 +1260,7 @@ void dshowMainFrame::CalculateTags(int cHits, long long gtime)
 		zsum = -1;
 	}
 //		Implement criteria
-	if (E > Pars.eHitMin && ncHits <= Pars.nClustMax && eclust > Pars.ePosMin && eclust < Pars.ePosMax && eclust / eall > Pars.eNFraction) {
+	if (E > Pars.eHitMin && ncHits <= Pars.nClustMax && eclust > Pars.ePosMin && eclust < Pars.ePosMax && eclust / eall > Pars.ePosFraction) {
 		EventTag = TAG_POSITRON;
 		EventEnergy = eclust;
 		Recent[1].Energy = eclust;
@@ -1252,8 +1271,13 @@ void dshowMainFrame::CalculateTags(int cHits, long long gtime)
 		CommonData->hTagEnergy[0]->Fill(Recent[1].Energy);
 		CommonData->hTagXY[0]->Fill(Recent[1].Vertex[0], Recent[1].Vertex[1]);
 		CommonData->hTagZ[0]->Fill(Recent[1].Vertex[2]);
+		CommonData->hCuts->Fill(CUT_POSITRON);
 		return;		
 	}
+	if (ncHits > Pars.nClustMax) CommonData->hCuts->Fill(CUT_PMULT);
+	if (E <= Pars.eHitMin || eclust <= Pars.ePosMin || eclust >= Pars.ePosMax) CommonData->hCuts->Fill(CUT_PENERGY);
+	if (eclust / eall <= Pars.ePosFraction) CommonData->hCuts->Fill(CUT_PFRACTION);
+	CommonData->hCuts->Fill(CUT_NONE);
 }
 
 /*	Process SelfTrigger					*/
@@ -1331,6 +1355,7 @@ void dshowMainFrame::ResetSummaHists(void)
 		CommonData->hPMThits[i]->Reset();
 		CommonData->hSPRatio[i]->Reset();
 	}
+	CommonData->hCuts->Reset();
 	TThread::UnLock();
 }
 
