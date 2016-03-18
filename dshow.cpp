@@ -7,6 +7,7 @@
 #include <TCanvas.h>
 #include <TColor.h>
 #include <TF1.h>
+#include <TFile.h>
 #include <TGaxis.h>
 #include <TGButton.h>
 #include <TGButtonGroup.h>
@@ -44,6 +45,7 @@
 #include "recformat.h"
 
 const char *DataFileTypes[] = {"Data files", "*.dat*", "All files", "*", 0, 0};
+const char *SaveFileTypes[] = {"Root files", "*.root", "PDF", "*.pdf", "PostScript", "*.ps", "JPEG", "*.jpg", "GIF", "*.gif", "PNG", "*.png", "All files", "*", 0, 0};
 const char *RateName[] = {"All", "NO veto"};
 const char *CutName[] = {"NONE", "VETO", "POSITRON", "NEUTRON", "NOSITIME", "NONX", "NONY", "NONZ", "NMULT", "NENERGY", "NFRACT", "PMULT", "PENERGY", "PFRACT"};
 
@@ -158,8 +160,13 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h, const char
 
 	PlayFile = new TGFileInfo();
 	PlayFile->fFileTypes = DataFileTypes;
-	PlayFile->fIniDir = strdup(".");
+	PlayFile->fIniDir = getcwd(NULL, 0);
 	PlayFile->SetMultipleSelection(1);
+
+	SaveFile = new TGFileInfo();
+	SaveFile->fFileTypes = SaveFileTypes;
+	SaveFile->fIniDir = getcwd(NULL, 0);
+	SaveFile->SetMultipleSelection(0);
 
    	PaletteStart = TColor::CreateGradientColorTable(sizeof(RGB_stop) / sizeof(RGB_stop[0]), RGB_stop, RGB_r, RGB_g, RGB_b, MAXRGB);
 	gStyle->SetPalette();
@@ -244,6 +251,10 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h, const char
    	TGTextButton *reset = new TGTextButton(vframe,"&Reset");
 	reset->Connect("Clicked()", "dshowMainFrame", this, "Reset()");
    	vframe->AddFrame(reset, new TGLayoutHints(kLHintsCenterX | kLHintsBottom, 5, 5, 3, 4));
+
+   	TGTextButton *save = new TGTextButton(vframe,"&Save");
+	save->Connect("Clicked()", "dshowMainFrame", this, "SaveDialog()");
+   	vframe->AddFrame(save, new TGLayoutHints(kLHintsCenterX | kLHintsBottom, 5, 5, 3, 4));
 
 	hframe->AddFrame(vframe, new TGLayoutHints(kLHintsRight | kLHintsExpandY, 5, 5, 3, 4));
 
@@ -408,6 +419,10 @@ void dshowMainFrame::CreateEventTab(TGTab *tab)
    	me->AddFrame(fEventCanvas, new TGLayoutHints(kLHintsExpandX | kLHintsExpandY, 10, 10, 10, 1));
 
    	TGHorizontalFrame *hframe=new TGHorizontalFrame(me);
+
+   	TGTextButton *save = new TGTextButton(hframe,"&Save");
+	save->Connect("Clicked()", "dshowMainFrame", this, "SaveEvent()");
+   	hframe->AddFrame(save, new TGLayoutHints(kLHintsCenterY | kLHintsLeft, 5, 5, 3, 4));
 
 	lb = new TGLabel(hframe, "PMT Threshold:");
    	hframe->AddFrame(lb, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));		
@@ -874,8 +889,6 @@ void dshowMainFrame::DrawEvent(TCanvas *cv)
 /*	show file open dialog and start thread to play to play selected data file(s)	*/
 void dshowMainFrame::PlayFileDialog(void)
 {
-	TString *cmd;
-
 	PlayFileStop();
 	new TGFileDialog(gClient->GetRoot(), this, kFDOpen, PlayFile);
 
@@ -886,12 +899,99 @@ void dshowMainFrame::PlayFileDialog(void)
 	}
 }
 
+/*	Save histogramms to pictures/root	*/
+void dshowMainFrame::SaveDialog(void)
+{
+	char str[1024];
+	char *name_beg;
+	char *name_end;
+	char def_end[] = "jpg";
+	TFile *f;
+	int i;
+
+	new TGFileDialog(gClient->GetRoot(), this, kFDSave, SaveFile);
+		
+	if (SaveFile->fFilename) {
+		TThread::Lock();
+		if (strstr(SaveFile->fFilename, "root")) {
+			f = new TFile(SaveFile->fFilename, "RECREATE");
+			if (CommonData->hWaveForm) CommonData->hWaveForm->Write();	// Waveform to show
+			for (i=0; i<MAXWFD; i++) {
+				CommonData->hAmpS[i]->Write();	// amplitude versus channel - self trigger
+				CommonData->hAmpE[i]->Write();	// amplitude versus channel - events
+				CommonData->hTimeA[i]->Write();	// time versus channel - events, no threshold
+				CommonData->hTimeB[i]->Write();	// time versus channel - events, with fixed threshold
+				CommonData->hTimeC[i]->Write();	// channel time - common SiPM time, TimeB thresholds
+			}
+			for(i=0; i<2; i++) {
+				CommonData->hSiPMsum[i]->Write();	// SiPM summa, all/no veto
+				CommonData->hSiPMhits[i]->Write();	// SiPM Hits, all/no veto
+				CommonData->hPMTsum[i]->Write();	// PMT summa, all/no veto
+				CommonData->hPMThits[i]->Write();	// PMT Hits, all/no veto
+				CommonData->hSPRatio[i]->Write();	// SiPM sum to PTMT sum ratio, all/no veto
+				CommonData->hTagEnergy[i]->Write();	// Computed enegry for tagged events
+				CommonData->hTagXY[i]->Write();	// XY-distribution for tagged events
+				CommonData->hTagZ[i]->Write();	// Z-distribution for tagged events
+				CommonData->hNeutrinoEnergy[i]->Write();	// Selected events positron and neutron energy
+				CommonData->hMesoEnergy[i]->Write();	// Selected meso-events positron and neutron energy
+				CommonData->hMesoTime[i]->Write();	// Meso-events meso-decay and neutron capture time
+			}
+			CommonData->hCaptureTime->Write();	// Neutron decay time
+			CommonData->hNeutronPath->Write();	// distance from positron to neutron
+			CommonData->hCuts->Write();		// Cut criteria
+			CommonData->hRate->Write();		// Rate
+
+			f->Close();
+			delete f;
+		} else {
+			name_beg = strdup(SaveFile->fFilename);
+			name_end = strrchr(name_beg, '.');
+			if (name_end) {
+				*name_end = '\0';
+				name_end++;
+			} else {
+				name_end = def_end;
+			}
+			
+			sprintf(str, "%s.wave.%s", name_beg, name_end);
+			fWaveCanvas->SaveAs(str);
+			sprintf(str, "%s.self.%s", name_beg, name_end);
+			fSelfCanvas->SaveAs(str);
+			sprintf(str, "%s.spect.%s", name_beg, name_end);
+			fSpectrumCanvas->SaveAs(str);
+			sprintf(str, "%s.time.%s", name_beg, name_end);
+			fTimeCanvas->SaveAs(str);
+			sprintf(str, "%s.event.%s", name_beg, name_end);
+			fEventCanvas->SaveAs(str);
+			sprintf(str, "%s.sum.%s", name_beg, name_end);
+			fSummaCanvas->SaveAs(str);
+			sprintf(str, "%s.rate.%s", name_beg, name_end);
+			fRateCanvas->SaveAs(str);
+			sprintf(str, "%s.tag.%s", name_beg, name_end);
+			fTagCanvas->SaveAs(str);
+			sprintf(str, "%s.neut.%s", name_beg, name_end);
+			fNeutrinoCanvas->SaveAs(str);
+			sprintf(str, "%s.muon.%s", name_beg, name_end);
+			fMuonCanvas->SaveAs(str);
+			free(name_beg);
+		}
+		TThread::UnLock();
+	}
+}
+
 void dshowMainFrame::PlayFileStop(void)
 {
 	CommonData->iStop = 1;
 	PlayProgress->SetPosition(0.0);
 	if (DataThread) DataThread->Join();
 	DataThread = NULL;
+}
+
+void dshowMainFrame::SaveEvent(void)
+{
+	char str[1024];
+	sprintf(str, "%s/event_%d.jpg", SaveFile->fIniDir, CommonData->thisEventCnt);
+	fEventCanvas->SaveAs(str);	
 }
 
 /*	Process an event					*/
@@ -1102,6 +1202,7 @@ void dshowMainFrame::ProcessEvent(char *data)
 		}
 		CommonData->EventTag = EventTag;
 		CommonData->EventEnergy = EventEnergy;
+		CommonData->thisEventCnt = CommonData->EventCnt;
 	}
 //		try to get time correlations
 	if (EventTag == TAG_NEUTRON) {

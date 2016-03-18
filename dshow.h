@@ -97,6 +97,7 @@ struct common_data_struct {
 	struct evt_disp_struct *Event;	// allocated by analysis for display
 	float EventEnergy;	// for display
 	int EventTag;		// for display
+	int thisEventCnt;	// current event number
 };
 
 #define TYPE_SIPM	0
@@ -227,6 +228,7 @@ private:
 	TGHProgressBar *PlayProgress;
 	TGHProgressBar *FileProgress;
 	TGCheckButton *Follow;
+	TGFileInfo *SaveFile;
 
 	int TimerCnt;
 	void ProcessEvent(char *data);
@@ -263,6 +265,8 @@ public:
 	void OnTimer(void);
 	void PlayFileDialog(void);
 	void PlayFileStop(void);
+	void SaveDialog(void);
+	void SaveEvent(void);
 	friend void *DataThreadFunction(void *ptr);
 	ClassDef(dshowMainFrame, 0)
 };
