@@ -912,8 +912,16 @@ void dshowMainFrame::SaveDialog(void)
 	new TGFileDialog(gClient->GetRoot(), this, kFDSave, SaveFile);
 		
 	if (SaveFile->fFilename) {
+		name_beg = strdup(SaveFile->fFilename);
+		name_end = strrchr(name_beg, '.');
+		if (name_end) {
+			*name_end = '\0';
+			name_end++;
+		} else {
+			name_end = def_end;
+		}
 		TThread::Lock();
-		if (strstr(SaveFile->fFilename, "root")) {
+		if (!strcmp(name_end, "root")) {
 			f = new TFile(SaveFile->fFilename, "RECREATE");
 			if (CommonData->hWaveForm) CommonData->hWaveForm->Write();	// Waveform to show
 			for (i=0; i<MAXWFD; i++) {
@@ -940,41 +948,47 @@ void dshowMainFrame::SaveDialog(void)
 			CommonData->hNeutronPath->Write();	// distance from positron to neutron
 			CommonData->hCuts->Write();		// Cut criteria
 			CommonData->hRate->Write();		// Rate
-
 			f->Close();
 			delete f;
+		} else if (!strcmp(name_end, "ps") || !strcmp(name_end, "pdf")) {
+			sprintf(str, "%s[", SaveFile->fFilename);
+			fWaveCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
+			strcpy(str, SaveFile->fFilename);
+			fWaveCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
+			fSelfCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
+			fSpectrumCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
+			fTimeCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
+			fEventCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
+			fSummaCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
+			fRateCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
+			fTagCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
+			fNeutrinoCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
+			fMuonCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
+			sprintf(str, "%s]", SaveFile->fFilename);
+			fMuonCanvas->GetCanvas()->Print(str, (Option_t *)name_end);			
 		} else {
-			name_beg = strdup(SaveFile->fFilename);
-			name_end = strrchr(name_beg, '.');
-			if (name_end) {
-				*name_end = '\0';
-				name_end++;
-			} else {
-				name_end = def_end;
-			}
-			
 			sprintf(str, "%s.wave.%s", name_beg, name_end);
-			fWaveCanvas->SaveAs(str);
+			fWaveCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
 			sprintf(str, "%s.self.%s", name_beg, name_end);
-			fSelfCanvas->SaveAs(str);
+			fSelfCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
 			sprintf(str, "%s.spect.%s", name_beg, name_end);
-			fSpectrumCanvas->SaveAs(str);
+			fSpectrumCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
 			sprintf(str, "%s.time.%s", name_beg, name_end);
-			fTimeCanvas->SaveAs(str);
+			fTimeCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
 			sprintf(str, "%s.event.%s", name_beg, name_end);
-			fEventCanvas->SaveAs(str);
+			fEventCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
 			sprintf(str, "%s.sum.%s", name_beg, name_end);
-			fSummaCanvas->SaveAs(str);
+			fSummaCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
 			sprintf(str, "%s.rate.%s", name_beg, name_end);
-			fRateCanvas->SaveAs(str);
+			fRateCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
 			sprintf(str, "%s.tag.%s", name_beg, name_end);
-			fTagCanvas->SaveAs(str);
+			fTagCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
 			sprintf(str, "%s.neut.%s", name_beg, name_end);
-			fNeutrinoCanvas->SaveAs(str);
+			fNeutrinoCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
 			sprintf(str, "%s.muon.%s", name_beg, name_end);
-			fMuonCanvas->SaveAs(str);
-			free(name_beg);
+			fMuonCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
 		}
+		free(name_beg);
 		TThread::UnLock();
 	}
 }
@@ -991,7 +1005,7 @@ void dshowMainFrame::SaveEvent(void)
 {
 	char str[1024];
 	sprintf(str, "%s/event_%d.jpg", SaveFile->fIniDir, CommonData->thisEventCnt);
-	fEventCanvas->SaveAs(str);	
+	fEventCanvas->Print(str);	
 }
 
 /*	Process an event					*/
