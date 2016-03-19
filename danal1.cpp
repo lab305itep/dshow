@@ -174,7 +174,7 @@ int main(int argc, char **argv)
 		irc = fread(buf, sizeof(int), 1, fIn);
 		if (irc != 1) break;
 		if (head->len > BSIZE || head->len < sizeof(struct rec_header_struct)) {
-			printf("Odd block size: %d\n", buf[0]);
+			printf("Odd block size: %d\n", head->len);
 			break;
 		}
 		irc = fread(&buf[sizeof(int)], head->len - sizeof(int), 1, fIn);
