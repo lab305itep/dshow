@@ -99,6 +99,22 @@ union hw_rec_union {
 	struct hw_rec_struct_delim delim;
 };
 
+struct pre_hit_struct {
+	float amp;
+	float time;
+	short int mod;
+	short int chan;
+};
+
+struct pre_event_struct {
+	int len;
+	int systime;
+	int number;
+	long long gtime;
+	int nhits;
+	struct pre_hit_struct hit[0];
+};
+
 //	Record types formed by UFWDTOOL
 #define REC_BEGIN	1		// Begin of file / data from the crate
 #define REC_PSEOC	10		// Marker for the end of pseudo cycle
