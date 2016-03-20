@@ -1,7 +1,7 @@
 ROOTCINT=rootcint
 #ROOTCINT=rootcling
 
-all : dshow danal1
+all : dshow danal1 danal2
 
 dshow : dshow.cpp dshowDict.cpp
 	g++ -o dshow dshow.cpp dshowDict.cpp `root-config --cflags --glibs` -lconfig
@@ -11,4 +11,7 @@ dshowDict.cpp : dshowLinkDef.h dshow.h
 
 danal1 : danal1.cpp
 	g++ -o $@ $^
+
+danal2 : danal2.cpp
+	g++ -o $@ $^ `root-config --cflags --glibs`
 
