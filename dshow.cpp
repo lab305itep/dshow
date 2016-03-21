@@ -1005,7 +1005,7 @@ void dshowMainFrame::SaveEvent(void)
 {
 	char str[1024];
 	sprintf(str, "%s/event_%d.jpg", SaveFile->fIniDir, CommonData->thisEventCnt);
-	fEventCanvas->Print(str);	
+	fEventCanvas->GetCanvas()->Print(str);	
 }
 
 /*	Process an event					*/

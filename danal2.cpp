@@ -56,7 +56,7 @@ int main(int argc, char**argv)
 
 	event = (struct pre_event_struct *) malloc(ESIZE);
 	if (!event) {
-		printf("Allocation failure %s: %m\n", argv[1]);
+		printf("Allocation failure: %m\n");
 		goto fin;
 	}
 //		Book histogramms and trees
