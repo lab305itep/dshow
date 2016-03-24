@@ -136,9 +136,9 @@ int main(int argc, char **argv)
 	event[0] = NULL;
 	event[1] = NULL;
 	
-	if (argc < 1) {
+	if (argc < 2) {
 		Help();
-		goto fin;
+		return 10;
 	}
 
 	fIn = OpenDataFile(argv[1]);
@@ -198,13 +198,13 @@ int main(int argc, char **argv)
 		}
 	}
 
+	printf("%d records and %d events processed. %d events written. %d Errors found.\n", Cnt, EventCnt, OutCnt, ErrCnt);
 fin:
 	if (fIn) fclose(fIn);
 	if (fOut) fclose(fOut);
 	if (buf) free(buf);
 	if (event[0]) free (event[0]);
 	if (event[1]) free (event[1]);
-	printf("%d records and %d events processed. %d events written. %d Errors found.\n", Cnt, EventCnt, OutCnt, ErrCnt);
 	return 0;
 }
 
