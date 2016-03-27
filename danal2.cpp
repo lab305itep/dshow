@@ -1,5 +1,6 @@
 #include <TFile.h>
 #include <TH1D.h>
+#include <math.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
@@ -8,10 +9,10 @@
 #define MAXHIT 500
 #define ESIZE (sizeof(struct pre_event_struct) + MAXHIT * sizeof(struct pre_hit_struct))
 #define MAXWFD 70
-//	12 per pixel * 1.5 crosstalk 15 p.e./MeV ~ 250
-#define SIPM2MEV 250.0	
-//	20 MeV ~ 2000 channels
-#define PMT2MEV 100.0
+#define MINSIPM4TIME	60
+#define MINPMT4TIME	10
+#define PMT2SIPM4TIME	3
+#define TCUT		10.0
 
 struct chan_def_struct {
 	char type;		// type = 0: SiPM, 1: PMT, 2: VETO
@@ -23,6 +24,86 @@ struct chan_def_struct {
 };
 
 struct chan_def_struct Map[MAXWFD][64];
+
+struct hit_struct {
+	float amp;
+	float time;
+	int type;
+	int proj;
+	int xy;
+	int z;
+};
+
+struct event_struct {
+	long long gtime;
+	int systime;
+	int number;
+	int nhits;
+	float e;
+	float t;
+	float x;
+	float y;
+	float z;
+	struct hit_struct hit[0];
+};
+
+#define EESIZE (sizeof(struct event_struct) + MAXHIT * sizeof(struct hit_struct))
+
+void FilterAndCopy(struct event_struct *Evt, struct pre_event_struct *event)
+{
+	struct chan_def_struct *chan;
+	struct pre_hit_struct *hit;
+	int i;
+	
+	for(i=0; i<event->nhits; i++) {
+		hit = &event->hit[i];
+		if (hit->mod < 1 || hit->mod > MAXWFD || hit->chan < 0 || hit->chan > 63) continue;
+		chan = &Map[hit->mod][hit->chan];
+		if (fabs(hit->time - chan->dt - Evt->t) > TCUT) continue;
+		Evt->hit[Evt->nhits].time = hit->time - chan->dt;
+		Evt->hit[Evt->nhits].amp = hit->amp * chan->ecoef;
+		Evt->hit[Evt->nhits].type = chan->type;
+		Evt->hit[Evt->nhits].proj = chan->proj;
+		Evt->hit[Evt->nhits].xy = chan->xy;
+		Evt->hit[Evt->nhits].z = chan->z;
+		Evt->nhits++;
+	}
+}
+
+float FindEventTime(struct pre_event_struct *event)
+{
+	float tsum;
+	float asum;
+	int i;
+	struct chan_def_struct *chan;
+	struct pre_hit_struct *hit;
+	
+	tsum = asum = 0;
+	for (i=0; i<event->nhits; i++) {
+		hit = &event->hit[i];
+		if (hit->mod < 1 || hit->mod > MAXWFD || hit->chan < 0 || hit->chan > 63) {
+			printf("Strange module/channel met: %d.%d\n", hit->mod, hit->chan);
+			continue;
+		}
+		chan = &Map[hit->mod][hit->chan];
+		switch (chan->type) {
+		case TYPE_SIPM:
+			if (hit->amp >= MINSIPM4TIME) {
+				tsum += hit->amp * (hit->time - chan->dt);
+				asum += hit->amp;
+			}
+			break;
+		case TYPE_PMT:
+		case TYPE_VETO:
+			if (hit->amp >= MINPMT4TIME) {
+				tsum += hit->amp * hit->time * PMT2SIPM4TIME;
+				asum += hit->amp * PMT2SIPM4TIME;
+			}
+			break;
+		}
+	}
+	return (asum > 0) ? tsum / asum : -1000;
+}
 
 TFile *OpenRootFile(const char *fname)
 {
@@ -90,23 +171,23 @@ int main(int argc, char**argv)
 	FILE *fIn;
 	TFile *fOut;
 	struct pre_event_struct *event;
+	struct event_struct *Evt;
 	int i, j, irc;
-	long long oldtime, oldtimec;
+	long long oldtime;
 	long long tbegin, tsum;
 	float A;
 	float E;
 	int flag;
-	TH1D *hDt;
-	TH1D *hDtc;
-	TH1D *hMaxSi;
-	TH1D *hMaxPMT;
-	TH1D *hT;
 	time_t systime;
+	int Cnt[20];
+	const char *CntName[20] = {"Events read", "Time defined", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""};
 
+	Evt = NULL;
 	event = NULL;
 	fIn = NULL;
 	fOut = NULL;
 	tsum = 0;
+	memset(Cnt, 0, sizeof(Cnt));
 
 	if (ReadMap("danss_map.txt")) return 10;
 
@@ -123,17 +204,14 @@ int main(int argc, char**argv)
 		goto fin;
 	}
 
+	Evt = (struct event_struct *) malloc(EESIZE);
 	event = (struct pre_event_struct *) malloc(ESIZE);
-	if (!event) {
+	if (!event || !Evt) {
 		printf("Allocation failure: %m\n");
 		goto fin;
 	}
+	
 //		Book histogramms and trees
-	hDt = new TH1D("hDt", "Time difference;us", 50, 0, 50);
-	hDtc = new TH1D("hDtc", "Time difference, with PMT energy cuts;us", 50, 0, 50);
-	hMaxSi = new TH1D("hMaxSi", "Maximum SiPM energy in event;MeV", 500, 0, 10);
-	hMaxPMT = new TH1D("hMaxPMT", "Maximum PMT energy in event;MeV", 500, 0, 10);
-	hT = new TH1D("hT", "Time in event distribution", 1000, -100, 100);
 		
 	for (j=1; j<argc; j++) {
 		fIn = fopen(argv[j], "rb");
@@ -142,7 +220,6 @@ int main(int argc, char**argv)
 			continue;
 		}
 		oldtime = -125000000;
-		oldtimec = -125000000;
 		for(;!feof(fIn);) {
 			irc = fread(event, sizeof(int), 1, fIn);
 			if (irc != 1) break;
@@ -160,32 +237,24 @@ int main(int argc, char**argv)
 				printf("File %s. Start: %s", argv[j], ctime(&systime));
 				tbegin = event->gtime;
 			}
-			hDt->Fill((event->gtime - oldtime) / 125.0);
+			Cnt[0]++;
+			memset(Evt, 0, sizeof(struct event_struct));
+			Evt->t = FindEventTime(event);
+			if (Evt->t < 0) continue;
+			FilterAndCopy(Evt, event);
 			oldtime = event->gtime;
-			E = 0;
-			for (i=0; i<event->nhits; i++) if (event->hit[i].mod == 1) E += event->hit[i].amp;
-			E /= PMT2MEV;
-			if (E > 2.0) hDtc->Fill((event->gtime - oldtimec) / 125.0);
-			if (E > 0.7) oldtimec = event->gtime;
-			A = 0;
-			for (i=0; i<event->nhits; i++) if (event->hit[i].mod != 1 && event->hit[i].mod != 3 && event->hit[i].amp > A) A = event->hit[i].amp;
-			if (E > 0.7) hMaxSi->Fill(A / SIPM2MEV);
-			A = 0;
-			for (i=0; i<event->nhits; i++) if (event->hit[i].mod == 1 && event->hit[i].amp > A) A = event->hit[i].amp;
-			if (E > 0.7) hMaxPMT->Fill(A / PMT2MEV);
 		}
 		printf("End: %s", ctime(&systime));
 		tsum += event->gtime - tbegin;
 		fclose(fIn);
 	}
-	hDt->Write();
-	hDtc->Write();
-	hMaxSi->Write();
-	hMaxPMT->Write();
 	printf("Total time %f s.\n", tsum / 125000000.0);
+	printf("Counters:\n");
+	for (i = 0; i < sizeof(Cnt)/sizeof(Cnt[0]); i++) if (Cnt[i]) printf("%50s: %10d\n", CntName[i], Cnt[i]);
 
 fin:
 	if (event) free(event);
+	if (Evt) free(Evt);
 	if (fOut && fOut->IsOpen()) {
 		fOut->Close();
 		delete fOut;

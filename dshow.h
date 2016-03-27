@@ -100,10 +100,6 @@ struct common_data_struct {
 	int thisEventCnt;	// current event number
 };
 
-#define TYPE_SIPM	0
-#define TYPE_PMT	1
-#define	TYPE_VETO	2
-
 struct channel_struct {
 	char type;		// 0 - SiPM, 1 - PMT, 2 - Veto, -1 - None
 	char xy;		// x or y: 0 - 24

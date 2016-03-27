@@ -137,5 +137,11 @@ struct pre_event_struct {
 #define TYPE_SUM	4		// digital sum of channels waveform 
 #define TYPE_DELIM	5		// synchronisation delimiter
 
+//	Channel type
+#define TYPE_SIPM	0
+#define TYPE_PMT	1
+#define	TYPE_VETO	2
+
+
 #endif /* RECFORMAT_H */
 
