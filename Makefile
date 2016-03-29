@@ -13,5 +13,5 @@ danal1 : danal1.cpp
 	g++ -o $@ $^
 
 danal2 : danal2.cpp
-	g++ -o $@ $^ `root-config --cflags --glibs`
+	g++ -g -o $@ $^ `root-config --cflags --glibs`
 

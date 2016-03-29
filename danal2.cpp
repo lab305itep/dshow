@@ -13,6 +13,8 @@
 #define MINPMT4TIME	10
 #define PMT2SIPM4TIME	3
 #define TCUT		10.0
+#define MAXTDIFF	50
+#define FREQ		125.0	
 
 struct chan_def_struct {
 	char type;		// type = 0: SiPM, 1: PMT, 2: VETO
@@ -49,23 +51,53 @@ struct event_struct {
 
 #define EESIZE (sizeof(struct event_struct) + MAXHIT * sizeof(struct hit_struct))
 
+union hist_union {
+	TObject *obj[0];
+	struct hist_struct {
+		TH1D *hDt[MAXWFD];
+		TH1D *hT;
+		TH1D *E[2];
+		TH1D *N[2];
+	} h;
+} Hist;
+
+void BookHist(void)
+{
+	char strs[32];
+	char strl[1024];
+	int i;
+	for (i=0; i<MAXWFD; i++) {
+		sprintf(strs, "hDt%2.2d", i+1);
+		sprintf(strl, "Time from average for Module %d;ns", i+1);
+		Hist.h.hDt[i] = new TH1D(strs, strl, 100, -5*TCUT, 5*TCUT);
+	}
+	Hist.h.hT = new TH1D("hT", "Second to first time difference;ns", 100, 0, MAXTDIFF);
+	Hist.h.E[0] = new TH1D("hE1", "The first energy;MeV", 50, 0, 10);
+	Hist.h.E[1] = new TH1D("hE2", "The second energy;MeV", 50, 0, 10);
+	Hist.h.N[0] = new TH1D("hN1", "The first multiplicity", 20, 0, 20);
+	Hist.h.N[1] = new TH1D("hN2", "The second multiplicity", 20, 0, 20);	
+}
+
 void FilterAndCopy(struct event_struct *Evt, struct pre_event_struct *event)
 {
 	struct chan_def_struct *chan;
 	struct pre_hit_struct *hit;
+	float delta;
 	int i;
 	
 	for(i=0; i<event->nhits; i++) {
 		hit = &event->hit[i];
 		if (hit->mod < 1 || hit->mod > MAXWFD || hit->chan < 0 || hit->chan > 63) continue;
 		chan = &Map[hit->mod][hit->chan];
-		if (fabs(hit->time - chan->dt - Evt->t) > TCUT) continue;
+		delta = hit->time - chan->dt - Evt->t;
+		Hist.h.hDt[hit->mod - 1]->Fill(delta);
+		if (fabs(delta) > TCUT) continue;
 		Evt->hit[Evt->nhits].time = hit->time - chan->dt;
-		Evt->hit[Evt->nhits].amp = hit->amp * chan->ecoef;
+		Evt->hit[Evt->nhits].amp  = hit->amp * chan->ecoef;
 		Evt->hit[Evt->nhits].type = chan->type;
 		Evt->hit[Evt->nhits].proj = chan->proj;
-		Evt->hit[Evt->nhits].xy = chan->xy;
-		Evt->hit[Evt->nhits].z = chan->z;
+		Evt->hit[Evt->nhits].xy   = chan->xy;
+		Evt->hit[Evt->nhits].z    = chan->z;
 		Evt->nhits++;
 	}
 }
@@ -172,15 +204,13 @@ int main(int argc, char**argv)
 	TFile *fOut;
 	struct pre_event_struct *event;
 	struct event_struct *Evt;
+	struct event_struct *EvtOld;
 	int i, j, irc;
 	long long oldtime;
 	long long tbegin, tsum;
-	float A;
-	float E;
-	int flag;
 	time_t systime;
 	int Cnt[20];
-	const char *CntName[20] = {"Events read", "Time defined", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""};
+	const char *CntName[20] = {"Events read", "Time defined", "In diff time cut", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""};
 
 	Evt = NULL;
 	event = NULL;
@@ -188,6 +218,7 @@ int main(int argc, char**argv)
 	fOut = NULL;
 	tsum = 0;
 	memset(Cnt, 0, sizeof(Cnt));
+	memset(Hist.obj, 0, sizeof(Hist));
 
 	if (ReadMap("danss_map.txt")) return 10;
 
@@ -205,11 +236,13 @@ int main(int argc, char**argv)
 	}
 
 	Evt = (struct event_struct *) malloc(EESIZE);
+	EvtOld = (struct event_struct *) malloc(EESIZE);
 	event = (struct pre_event_struct *) malloc(ESIZE);
-	if (!event || !Evt) {
+	if (!event || !Evt || !EvtOld) {
 		printf("Allocation failure: %m\n");
 		goto fin;
 	}
+	BookHist();
 	
 //		Book histogramms and trees
 		
@@ -220,6 +253,7 @@ int main(int argc, char**argv)
 			continue;
 		}
 		oldtime = -125000000;
+		tbegin = -1;
 		for(;!feof(fIn);) {
 			irc = fread(event, sizeof(int), 1, fIn);
 			if (irc != 1) break;
@@ -233,7 +267,7 @@ int main(int argc, char**argv)
 				break;
 			}
 			systime = event->systime;
-			if (oldtime < 0) {
+			if (tbegin < 0) {
 				printf("File %s. Start: %s", argv[j], ctime(&systime));
 				tbegin = event->gtime;
 			}
@@ -241,20 +275,33 @@ int main(int argc, char**argv)
 			memset(Evt, 0, sizeof(struct event_struct));
 			Evt->t = FindEventTime(event);
 			if (Evt->t < 0) continue;
+			Cnt[1]++;
 			FilterAndCopy(Evt, event);
+			memcpy(EvtOld, Evt, sizeof(event_struct));
+			if (event->gtime - oldtime > MAXTDIFF * FREQ) continue;
+			Cnt[2]++;
+			Hist.h.hT->Fill((Evt->gtime - oldtime) / FREQ);
+			Hist.h.E[0]->Fill(EvtOld->e);
+			Hist.h.E[1]->Fill(Evt->e);
+			Hist.h.N[0]->Fill(EvtOld->nhits);
+			Hist.h.N[1]->Fill(Evt->nhits);
 			oldtime = event->gtime;
 		}
 		printf("End: %s", ctime(&systime));
 		tsum += event->gtime - tbegin;
 		fclose(fIn);
 	}
-	printf("Total time %f s.\n", tsum / 125000000.0);
+	printf("Total time %f s.\n", tsum / (FREQ*1000000.0));
 	printf("Counters:\n");
 	for (i = 0; i < sizeof(Cnt)/sizeof(Cnt[0]); i++) if (Cnt[i]) printf("%50s: %10d\n", CntName[i], Cnt[i]);
-
+	for (i = 0; i< sizeof(Hist) / sizeof(Hist.obj[0]); i++) if (Hist.obj[i]) {
+		Hist.obj[i]->Write();
+		delete Hist.obj[i];
+	}
 fin:
 	if (event) free(event);
 	if (Evt) free(Evt);
+	if (EvtOld) free(EvtOld);
 	if (fOut && fOut->IsOpen()) {
 		fOut->Close();
 		delete fOut;
