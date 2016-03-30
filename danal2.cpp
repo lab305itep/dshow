@@ -1,5 +1,6 @@
 #include <TFile.h>
 #include <TH1D.h>
+#include <TH2D.h>
 #include <math.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -10,11 +11,14 @@
 #define ESIZE (sizeof(struct pre_event_struct) + MAXHIT * sizeof(struct pre_hit_struct))
 #define MAXWFD 70
 #define MINSIPM4TIME	60
-#define MINPMT4TIME	10
-#define PMT2SIPM4TIME	3
-#define TCUT		10.0
+#define MINPMT4TIME	20
+#define PMT2SIPM4TIME	2
+#define TCUT		7.5
 #define MAXTDIFF	50
-#define FREQ		125.0	
+#define FREQ		125.0
+#define E1MIN		1.0
+#define E2MIN		3.0
+#define EMAX		10.0
 
 struct chan_def_struct {
 	char type;		// type = 0: SiPM, 1: PMT, 2: VETO
@@ -37,13 +41,15 @@ struct hit_struct {
 };
 
 struct event_struct {
-	long long gtime;
-	int systime;
-	int number;
-	int nhits;
-	float e;
-	float t;
-	float x;
+	long long gtime;	// 125MHz global time counter
+	int systime;		// Linux system time 
+	int number;		// Event number
+	int nhits;		// number of hits
+	int ns;			// number of strips
+	float es;		// SiPM energy
+	float ep;		// PMT energy
+	float t;		// precise time
+	float x;		// x, y, z of the vertex
 	float y;
 	float z;
 	struct hit_struct hit[0];
@@ -55,9 +61,9 @@ union hist_union {
 	TObject *obj[0];
 	struct hist_struct {
 		TH1D *hDt[MAXWFD];
-		TH1D *hT;
-		TH1D *E[2];
-		TH1D *N[2];
+		TH1D *hT[2];
+		TH2D *hEN[3];
+		TH2D *hESEP[3];
 	} h;
 } Hist;
 
@@ -71,11 +77,33 @@ void BookHist(void)
 		sprintf(strl, "Time from average for Module %d;ns", i+1);
 		Hist.h.hDt[i] = new TH1D(strs, strl, 100, -5*TCUT, 5*TCUT);
 	}
-	Hist.h.hT = new TH1D("hT", "Second to first time difference;ns", 100, 0, MAXTDIFF);
-	Hist.h.E[0] = new TH1D("hE1", "The first energy;MeV", 50, 0, 10);
-	Hist.h.E[1] = new TH1D("hE2", "The second energy;MeV", 50, 0, 10);
-	Hist.h.N[0] = new TH1D("hN1", "The first multiplicity", 20, 0, 20);
-	Hist.h.N[1] = new TH1D("hN2", "The second multiplicity", 20, 0, 20);	
+	Hist.h.hT[0] = new TH1D("hT0", "Second to first time difference;ns", 100, 0, MAXTDIFF);
+	Hist.h.hT[1] = new TH1D("hT1", "Second to first time difference, selected events;ns", 100, 0, MAXTDIFF);
+	Hist.h.hEN[0] = new TH2D("hEN0", "Energy versus multiplicity for SiPM, no cuts;;MeV", 20, 0, 20, 50, 0, 10);
+	Hist.h.hEN[1] = new TH2D("hEN1", "Energy versus multiplicity for SiPM, selected the first event;;MeV", 20, 0, 20, 50, 0, 10);
+	Hist.h.hEN[2] = new TH2D("hEN2", "Energy versus multiplicity for SiPM, selected the second event;;MeV", 20, 0, 20, 50, 0, 10);
+	Hist.h.hESEP[0] = new TH2D("hESEP0", "PMT versus SiPM energy, no cuts;MeV;MeV", 50, 0, 10, 50, 0, 10);
+	Hist.h.hESEP[1] = new TH2D("hESEP1", "PMT versus SiPM energy, selected the first event;MeV;MeV", 50, 0, 10, 50, 0, 10);
+	Hist.h.hESEP[2] = new TH2D("hESEP2", "PMT versus SiPM energy, selected the second event;MeV;MeV", 50, 0, 10, 50, 0, 10);
+}
+
+void CalculateEventEnergy(struct event_struct *Evt)
+{
+	int i;
+	
+	Evt->es = Evt->ep = 0;
+	Evt->ns = 0;
+	for (i=0; i<Evt->nhits; i++) {
+		switch(Evt->hit[i].type) {
+		case TYPE_SIPM:
+			Evt->es += Evt->hit[i].amp;
+			Evt->ns++;
+			break;
+		case TYPE_PMT:
+			Evt->ep += Evt->hit[i].amp;
+			break;
+		}
+	}
 }
 
 void FilterAndCopy(struct event_struct *Evt, struct pre_event_struct *event)
@@ -85,10 +113,14 @@ void FilterAndCopy(struct event_struct *Evt, struct pre_event_struct *event)
 	float delta;
 	int i;
 	
+	Evt->nhits = 0;
+	Evt->gtime = event->gtime;
+	Evt->systime = event->systime;
+	Evt->number = event->number;
 	for(i=0; i<event->nhits; i++) {
 		hit = &event->hit[i];
 		if (hit->mod < 1 || hit->mod > MAXWFD || hit->chan < 0 || hit->chan > 63) continue;
-		chan = &Map[hit->mod][hit->chan];
+		chan = &Map[hit->mod-1][hit->chan];
 		delta = hit->time - chan->dt - Evt->t;
 		Hist.h.hDt[hit->mod - 1]->Fill(delta);
 		if (fabs(delta) > TCUT) continue;
@@ -117,7 +149,7 @@ float FindEventTime(struct pre_event_struct *event)
 			printf("Strange module/channel met: %d.%d\n", hit->mod, hit->chan);
 			continue;
 		}
-		chan = &Map[hit->mod][hit->chan];
+		chan = &Map[hit->mod-1][hit->chan];
 		switch (chan->type) {
 		case TYPE_SIPM:
 			if (hit->amp >= MINSIPM4TIME) {
@@ -128,7 +160,7 @@ float FindEventTime(struct pre_event_struct *event)
 		case TYPE_PMT:
 		case TYPE_VETO:
 			if (hit->amp >= MINPMT4TIME) {
-				tsum += hit->amp * hit->time * PMT2SIPM4TIME;
+				tsum += hit->amp * (hit->time - chan->dt) * PMT2SIPM4TIME;
 				asum += hit->amp * PMT2SIPM4TIME;
 			}
 			break;
@@ -190,7 +222,7 @@ int ReadMap(const char *fname)
 		Map[mod-1][chan].xy    = xy;
 		Map[mod-1][chan].z     = z;
 		Map[mod-1][chan].dt    = dt;
-		Map[mod-1][chan].ecoef = ecoef;
+		Map[mod-1][chan].ecoef = ecoef / 1000;	// keV -> MeV
 		cnt++;
 	}
 	fclose(f);
@@ -206,11 +238,10 @@ int main(int argc, char**argv)
 	struct event_struct *Evt;
 	struct event_struct *EvtOld;
 	int i, j, irc;
-	long long oldtime;
 	long long tbegin, tsum;
 	time_t systime;
 	int Cnt[20];
-	const char *CntName[20] = {"Events read", "Time defined", "In diff time cut", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""};
+	const char *CntName[20] = {"Events read", "Time defined", "In diff time cut", "In energy cuts", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""};
 
 	Evt = NULL;
 	event = NULL;
@@ -252,7 +283,7 @@ int main(int argc, char**argv)
 			printf("Can not open input file %s: %m\n", argv[j]);
 			continue;
 		}
-		oldtime = -125000000;
+		EvtOld->gtime = -125000000;
 		tbegin = -1;
 		for(;!feof(fIn);) {
 			irc = fread(event, sizeof(int), 1, fIn);
@@ -277,15 +308,22 @@ int main(int argc, char**argv)
 			if (Evt->t < 0) continue;
 			Cnt[1]++;
 			FilterAndCopy(Evt, event);
-			memcpy(EvtOld, Evt, sizeof(event_struct));
-			if (event->gtime - oldtime > MAXTDIFF * FREQ) continue;
-			Cnt[2]++;
-			Hist.h.hT->Fill((Evt->gtime - oldtime) / FREQ);
-			Hist.h.E[0]->Fill(EvtOld->e);
-			Hist.h.E[1]->Fill(Evt->e);
-			Hist.h.N[0]->Fill(EvtOld->nhits);
-			Hist.h.N[1]->Fill(Evt->nhits);
-			oldtime = event->gtime;
+			CalculateEventEnergy(Evt);
+			Hist.h.hT[0]->Fill((Evt->gtime - EvtOld->gtime) / FREQ);
+			Hist.h.hEN[0]->Fill(Evt->ns, Evt->es);
+			Hist.h.hESEP[0]->Fill(Evt->es, Evt->ep);
+			if (Evt->gtime - EvtOld->gtime <= MAXTDIFF * FREQ) {
+				Cnt[2]++;
+				if (Evt->es > E2MIN) {
+					Cnt[3]++;
+					Hist.h.hT[1]->Fill((Evt->gtime - EvtOld->gtime) / FREQ);
+					Hist.h.hEN[1]->Fill(EvtOld->ns, Evt->es);
+					Hist.h.hESEP[1]->Fill(EvtOld->es, Evt->ep);
+					Hist.h.hEN[2]->Fill(Evt->ns, Evt->es);
+					Hist.h.hESEP[2]->Fill(Evt->es, Evt->ep);
+				}
+			}
+			if (Evt->es > E1MIN) memcpy(EvtOld, Evt, sizeof(event_struct));
 		}
 		printf("End: %s", ctime(&systime));
 		tsum += event->gtime - tbegin;
