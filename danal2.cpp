@@ -317,8 +317,8 @@ int main(int argc, char**argv)
 				if (Evt->es > E2MIN) {
 					Cnt[3]++;
 					Hist.h.hT[1]->Fill((Evt->gtime - EvtOld->gtime) / FREQ);
-					Hist.h.hEN[1]->Fill(EvtOld->ns, Evt->es);
-					Hist.h.hESEP[1]->Fill(EvtOld->es, Evt->ep);
+					Hist.h.hEN[1]->Fill(EvtOld->ns, EvtOld->es);
+					Hist.h.hESEP[1]->Fill(EvtOld->es, EvtOld->ep);
 					Hist.h.hEN[2]->Fill(Evt->ns, Evt->es);
 					Hist.h.hESEP[2]->Fill(Evt->es, Evt->ep);
 				}
