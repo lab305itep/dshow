@@ -1,17 +1,26 @@
 //	SiPM only - the rest is easy with text editor
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
+#define SIPIX	12.0
+#define MIP	2000.0
+
+float SiCalib[70][64];
 
 // mod=1...70; con=1...4; proj=0/1; xy=1...5; z=1...17
 void SiPM(int mod, int con, int proj, int xy, int z, float dt, float ecoef)
 {
 	int i;
+	float ec;
+	
 //		mod chan type proj xy z dt(ns) ecoef(keV)
 	for (i=0; i<15; i++) if (z != 17 || ((i%3) != 2)) {
+		ec = (SiCalib[mod-1][(con - 1) * 16 + i] > 0) ? SiCalib[mod-1][(con - 1) * 16 + i] : ecoef;
 		if (proj) {
-			printf("C\t%2d\t%2d\t0\t%d\t%2d\t%d\t%f\t%f\n", mod, (con - 1) * 16 + i, 1, 5*(xy-1) + i/3, 6*(z-1) + 2*(i%3) + 1, dt, ecoef);
+			printf("C\t%2d\t%2d\t0\t%d\t%2d\t%d\t%f\t%f\n", mod, (con - 1) * 16 + i, 1, 5*(xy-1) + i/3, 6*(z-1) + 2*(i%3) + 1, dt, ec);
 		} else {
-			printf("C\t%2d\t%2d\t0\t%d\t%2d\t%d\t%f\t%f\n", mod, (con - 1) * 16 + i, 0, 5*(xy-1) + 4 - i/3, 6*(z-1) + 2*(i%3), dt, ecoef);	
+			printf("C\t%2d\t%2d\t0\t%d\t%2d\t%d\t%f\t%f\n", mod, (con - 1) * 16 + i, 0, 5*(xy-1) + 4 - i/3, 6*(z-1) + 2*(i%3), dt, ec);	
 		}
 	}
 }
@@ -27,8 +36,46 @@ void VETO(int mod, int chan, float dt, float ecoef)
 	printf("C\t%2d\t%2d\t2\t0\t0\t0\t%f\t%f\n", mod, chan - 1, dt, ecoef);	
 }
 
-int main()
+double GetKey(const char *str, const char *key)
 {
+	char *ptr;
+	
+	ptr = strstr((char *)str, key);
+	if (!ptr) return -1;
+	ptr += strlen(key);
+	return strtod(ptr, NULL);
+}
+
+void ReadCalib(char *fname)
+{
+	FILE *f;
+	char str[1024];
+	int mod, chan;
+	float mip, cr;
+	
+	f = fopen(fname, "rt");
+	if (!f) {
+		printf("W\tCan not open file %s\n", fname);
+		return;
+	} 
+	printf("I\tCalibration file %s\n", fname);
+	for(;;) {
+		if (!fgets(str, sizeof(str), f)) break;
+		mod = GetKey(str, "ADC=");
+		chan = GetKey(str, "ADCch=");
+		mip = GetKey(str, "mip=");
+		cr = GetKey(str, "NpixPerPe=");
+		if (mod <= 0 || chan < 0 || mip <= 0 || cr <= 0) continue;
+		SiCalib[mod-1][chan] = MIP / (SIPIX * mip * cr);
+	}
+	
+	fclose(f);
+}
+
+int main(int argc, char **argv)
+{
+	memset(SiCalib, 0, sizeof(SiCalib));
+	if (argc > 1) ReadCalib(argv[1]);
 //	  mod, chan, proj, xy, z,   dt, ecoef 
 	PMT(1,    1,    0,  5, 5, 48.1,  9.25);
 	PMT(1,    2,    0,  5, 4, 50.3,  8.15);
