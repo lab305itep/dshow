@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define SIPIX	12.0
+#define SIPIX	14.0
 #define MIP	2000.0
 
 float SiCalib[70][64];
@@ -17,10 +17,10 @@ void SiPM(int mod, int con, int proj, int xy, int z, float dt, float ecoef)
 //		mod chan type proj xy z dt(ns) ecoef(keV)
 	for (i=0; i<15; i++) if (z != 17 || ((i%3) != 2)) {
 		ec = (SiCalib[mod-1][(con - 1) * 16 + i] > 0) ? SiCalib[mod-1][(con - 1) * 16 + i] : ecoef;
-		if (proj) {
-			printf("C\t%2d\t%2d\t0\t%d\t%2d\t%d\t%f\t%f\n", mod, (con - 1) * 16 + i, 1, 5*(xy-1) + i/3, 6*(z-1) + 2*(i%3) + 1, dt, ec);
-		} else {
-			printf("C\t%2d\t%2d\t0\t%d\t%2d\t%d\t%f\t%f\n", mod, (con - 1) * 16 + i, 0, 5*(xy-1) + 4 - i/3, 6*(z-1) + 2*(i%3), dt, ec);	
+		if (proj) {	// X
+			printf("C\t%2d\t%2d\t0\t1\t%2d\t%d\t%f\t%f\n", mod, (con - 1) * 16 + i, 5*(xy-1) + 4 - i/3, 6*(z-1) + 2*(i%3) + 1, dt, ec);
+		} else {	// Y
+			printf("C\t%2d\t%2d\t0\t0\t%2d\t%d\t%f\t%f\n", mod, (con - 1) * 16 + i, 5*(xy-1) + i/3, 6*(z-1) + 2*(i%3), dt, ec);	
 		}
 	}
 }

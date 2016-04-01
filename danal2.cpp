@@ -13,7 +13,7 @@
 #define MINSIPM4TIME	60
 #define MINPMT4TIME	20
 #define PMT2SIPM4TIME	2
-#define TCUT		7.5
+#define TCUT		10
 #define MAXTDIFF	50
 #define FREQ		125.0
 #define E1MIN		1.0
@@ -61,9 +61,14 @@ union hist_union {
 	TObject *obj[0];
 	struct hist_struct {
 		TH1D *hDt[MAXWFD];
-		TH1D *hT[2];
-		TH2D *hEN[3];
-		TH2D *hESEP[3];
+		TH1D *hDtc[MAXWFD];
+		TH1D *hDtr[MAXWFD];
+		TH1D *hDtn[3][MAXWFD];
+		TH1D *hT[4];
+		TH2D *hEN[5];
+		TH2D *hESEP[5];
+		TH2D *hXZ[5];
+		TH2D *hYZ[5];
 		TH1D *hM;
 	} h;
 } Hist;
@@ -77,15 +82,46 @@ void BookHist(void)
 		sprintf(strs, "hDt%2.2d", i+1);
 		sprintf(strl, "Time from average for Module %d;ns", i+1);
 		Hist.h.hDt[i] = new TH1D(strs, strl, 100, -5*TCUT, 5*TCUT);
+		sprintf(strs, "hDtc%2.2d", i+1);
+		sprintf(strl, "Time from average for Module %d, A>30;ns", i+1);
+		Hist.h.hDtc[i] = new TH1D(strs, strl, 100, -5*TCUT, 5*TCUT);
+		sprintf(strs, "hDtr%2.2d", i+1);
+		sprintf(strl, "Time from average for Module %d, 60>A>30;ns", i+1);
+		Hist.h.hDtr[i] = new TH1D(strs, strl, 100, -5*TCUT, 5*TCUT);
+		sprintf(strs, "hDtn0%2.2d", i+1);
+		sprintf(strl, "Time from average for Module %d, second event;ns", i+1);
+		Hist.h.hDtn[0][i] = new TH1D(strs, strl, 100, -5*TCUT, 5*TCUT);
+		sprintf(strs, "hDtn1%2.2d", i+1);
+		sprintf(strl, "Time from average for Module %d, third event;ns", i+1);
+		Hist.h.hDtn[1][i] = new TH1D(strs, strl, 100, -5*TCUT, 5*TCUT);
+		sprintf(strs, "hDtn2%2.2d", i+1);
+		sprintf(strl, "Time from average for Module %d, fourth event;ns", i+1);
+		Hist.h.hDtn[2][i] = new TH1D(strs, strl, 100, -5*TCUT, 5*TCUT);
 	}
 	Hist.h.hT[0] = new TH1D("hT0", "Second to first time difference;us", 100, 0, MAXTDIFF);
-	Hist.h.hT[1] = new TH1D("hT1", "Second to first time difference, selected events;us", 100, 0, MAXTDIFF);
-	Hist.h.hEN[0] = new TH2D("hEN0", "Energy versus multiplicity for SiPM, no cuts;;MeV", 20, 0, 20, 50, 0, 10);
-	Hist.h.hEN[1] = new TH2D("hEN1", "Energy versus multiplicity for SiPM, selected the first event;;MeV", 20, 0, 20, 50, 0, 15);
-	Hist.h.hEN[2] = new TH2D("hEN2", "Energy versus multiplicity for SiPM, selected the second event;;MeV", 20, 0, 20, 50, 0, 15);
-	Hist.h.hESEP[0] = new TH2D("hESEP0", "PMT versus SiPM energy, no cuts;MeV;MeV", 50, 0, 10, 50, 0, 10);
-	Hist.h.hESEP[1] = new TH2D("hESEP1", "PMT versus SiPM energy, selected the first event;MeV;MeV", 50, 0, 15, 50, 0, 15);
-	Hist.h.hESEP[2] = new TH2D("hESEP2", "PMT versus SiPM energy, selected the second event;MeV;MeV", 50, 0, 15, 50, 0, 15);
+	Hist.h.hT[1] = new TH1D("hT1", "Second to first time difference 1, selected events;us", 100, 0, MAXTDIFF);
+	Hist.h.hT[2] = new TH1D("hT2", "Second to first time difference 2, selected events;us", 100, 0, MAXTDIFF);
+	Hist.h.hT[3] = new TH1D("hT3", "Second to first time difference 3, selected events;us", 100, 0, MAXTDIFF);
+	Hist.h.hEN[0] = new TH2D("hEN0", "Energy versus multiplicity for SiPM, no cuts;;MeV", 20, 0, 20, 60, 0, 15);
+	Hist.h.hEN[1] = new TH2D("hEN1", "Energy versus multiplicity for SiPM, selected the first event;;MeV", 20, 0, 20, 60, 0, 15);
+	Hist.h.hEN[2] = new TH2D("hEN2", "Energy versus multiplicity for SiPM, selected the second event;;MeV", 20, 0, 20, 60, 0, 15);
+	Hist.h.hEN[3] = new TH2D("hEN3", "Energy versus multiplicity for SiPM, selected the third event;;MeV", 20, 0, 20, 60, 0, 15);
+	Hist.h.hEN[4] = new TH2D("hEN4", "Energy versus multiplicity for SiPM, selected the fourth event;;MeV", 20, 0, 20, 60, 0, 15);
+	Hist.h.hESEP[0] = new TH2D("hESEP0", "PMT versus SiPM energy, no cuts;MeV;MeV", 60, 0, 15, 60, 0, 15);
+	Hist.h.hESEP[1] = new TH2D("hESEP1", "PMT versus SiPM energy, selected the first event;MeV;MeV", 60, 0, 15, 60, 0, 15);
+	Hist.h.hESEP[2] = new TH2D("hESEP2", "PMT versus SiPM energy, selected the second event;MeV;MeV", 60, 0, 15, 60, 0, 15);
+	Hist.h.hESEP[3] = new TH2D("hESEP3", "PMT versus SiPM energy, selected the third event;MeV;MeV", 60, 0, 15, 60, 0, 15);
+	Hist.h.hESEP[4] = new TH2D("hESEP4", "PMT versus SiPM energy, selected the fourth event;MeV;MeV", 60, 0, 15, 60, 0, 15);
+	Hist.h.hXZ[0] = new TH2D("hXZ0", "XZ - SiPM distribution, no cuts", 25, 0, 25, 50, 0, 50);
+	Hist.h.hXZ[1] = new TH2D("hXZ1", "XZ - SiPM distribution, selected the first event", 25, 0, 25, 50, 0, 50);
+	Hist.h.hXZ[2] = new TH2D("hXZ2", "XZ - SiPM distribution, selected the second event", 25, 0, 25, 50, 0, 50);
+	Hist.h.hXZ[3] = new TH2D("hXZ3", "XZ - SiPM distribution, selected the third event", 25, 0, 25, 50, 0, 50);
+	Hist.h.hXZ[4] = new TH2D("hXZ4", "XZ - SiPM distribution, selected the fourth event", 25, 0, 25, 50, 0, 50);
+	Hist.h.hYZ[0] = new TH2D("hYZ0", "YZ - SiPM distribution, no cuts", 25, 0, 25, 50, 0, 50);
+	Hist.h.hYZ[1] = new TH2D("hYZ1", "YZ - SiPM distribution, selected the first event", 25, 0, 25, 50, 0, 50);
+	Hist.h.hYZ[2] = new TH2D("hYZ2", "YZ - SiPM distribution, selected the second event", 25, 0, 25, 50, 0, 50);
+	Hist.h.hYZ[3] = new TH2D("hYZ3", "YZ - SiPM distribution, selected the third event", 25, 0, 25, 50, 0, 50);
+	Hist.h.hYZ[4] = new TH2D("hYZ4", "YZ - SiPM distribution, selected the fourth event", 25, 0, 25, 50, 0, 50);
 	Hist.h.hM = new TH1D("hM", "Number of events in time window (50 us)", 20, 0, 20);
 }
 
@@ -108,6 +144,18 @@ void CalculateEventEnergy(struct event_struct *Evt)
 	}
 }
 
+void FillXYZ(struct event_struct *Evt, int num)
+{
+	int i;
+	for (i=0; i<Evt->nhits; i++) if (Evt->hit[i].type == TYPE_SIPM) {
+		if (Evt->hit[i].proj) {
+			Hist.h.hXZ[num]->Fill(Evt->hit[i].xy+0.5, Evt->hit[i].z/2+0.5, Evt->hit[i].amp);
+		} else {
+			Hist.h.hYZ[num]->Fill(24.5 - Evt->hit[i].xy, Evt->hit[i].z/2+0.5, Evt->hit[i].amp);
+		}
+	}
+}
+
 void FilterAndCopy(struct event_struct *Evt, struct pre_event_struct *event)
 {
 	struct chan_def_struct *chan;
@@ -125,6 +173,8 @@ void FilterAndCopy(struct event_struct *Evt, struct pre_event_struct *event)
 		chan = &Map[hit->mod-1][hit->chan];
 		delta = hit->time - chan->dt - Evt->t;
 		Hist.h.hDt[hit->mod - 1]->Fill(delta);
+		if (hit->amp > 30) Hist.h.hDtc[hit->mod - 1]->Fill(delta);
+		if (hit->amp > 30 && hit->amp < 60) Hist.h.hDtr[hit->mod - 1]->Fill(delta);
 		if (fabs(delta) > TCUT) continue;
 		Evt->hit[Evt->nhits].time = hit->time - chan->dt;
 		Evt->hit[Evt->nhits].amp  = hit->amp * chan->ecoef;
@@ -133,6 +183,22 @@ void FilterAndCopy(struct event_struct *Evt, struct pre_event_struct *event)
 		Evt->hit[Evt->nhits].xy   = chan->xy;
 		Evt->hit[Evt->nhits].z    = chan->z;
 		Evt->nhits++;
+	}
+}
+
+void FillN(struct pre_event_struct *event, float event_time, int num)
+{
+	struct chan_def_struct *chan;
+	struct pre_hit_struct *hit;
+	float delta;
+	int i;
+
+	for(i=0; i<event->nhits; i++) {
+		hit = &event->hit[i];
+		if (hit->mod < 1 || hit->mod > MAXWFD || hit->chan < 0 || hit->chan > 63) continue;
+		chan = &Map[hit->mod-1][hit->chan];
+		delta = hit->time - chan->dt - event_time;
+		Hist.h.hDtn[num][hit->mod - 1]->Fill(delta);
 	}
 }
 
@@ -194,7 +260,7 @@ int ReadMap(const char *fname)
 	float ecoef;
 	int mod, chan;
 	int cnt;
-	char c;
+	char str[1024];
 
 	memset(Map, -1, sizeof(Map));
 	f = fopen(fname, "rt");
@@ -205,8 +271,9 @@ int ReadMap(const char *fname)
 	cnt = 0;
 	while (!feof(f)) {
 //		mod chan type proj xy z dt ecoef
-		fscanf(f, "%c %d %d %d %d %d %d %f %f\n", &c, &mod, &chan, &type, &proj, &xy, &z, &dt, &ecoef);
-		if (c != 'C') continue;
+		if (!fgets(str, sizeof(str), f)) break;
+		if (str[0] != 'C') continue;
+		sscanf(&str[1], "%d %d %d %d %d %d %f %f", &mod, &chan, &type, &proj, &xy, &z, &dt, &ecoef);
 		if (mod < 1 || mod > MAXWFD) {
 			printf("Module number = %d out of range: 1 - %d\n", mod, MAXWFD);
 			return -20;
@@ -244,7 +311,8 @@ int main(int argc, char**argv)
 	int EvWin;
 	time_t systime;
 	int Cnt[20];
-	const char *CntName[20] = {"Events read", "Time defined", "In diff time cut", "In energy cuts", "Global events", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""};
+	const char *CntName[20] = {"Events read", "Time defined", "In diff time cut", "In energy cuts", "Global events", "Global events+2", "Global events+3", 
+		"", "", "", "", "", "", "", "", "", "", "", "", ""};
 
 	Evt = NULL;
 	event = NULL;
@@ -316,22 +384,44 @@ int main(int argc, char**argv)
 			Hist.h.hT[0]->Fill((Evt->gtime - EvtOld->gtime) / FREQ);
 			Hist.h.hEN[0]->Fill(Evt->ns, Evt->es);
 			Hist.h.hESEP[0]->Fill(Evt->es, Evt->ep);
+			FillXYZ(Evt, 0);
 			if (Evt->gtime - EvtOld->gtime <= MAXTDIFF * FREQ) {
 				Cnt[2]++;
 				if (Evt->ep > E2MIN) {
 					Cnt[3]++;
-					if (!EvWin) {
+					switch (EvWin) {
+					case 0:
 						Hist.h.hT[1]->Fill((Evt->gtime - EvtOld->gtime) / FREQ);
 						Hist.h.hEN[1]->Fill(EvtOld->ns, EvtOld->es);
 						Hist.h.hESEP[1]->Fill(EvtOld->es, EvtOld->ep);
+						FillXYZ(EvtOld, 1);
 						Hist.h.hEN[2]->Fill(Evt->ns, Evt->es);
 						Hist.h.hESEP[2]->Fill(Evt->es, Evt->ep);
+						FillXYZ(Evt, 2);
+						FillN(event, Evt->t, 0);
 						Cnt[4]++;
+						break;
+					case 1:
+						Hist.h.hT[2]->Fill((Evt->gtime - EvtOld->gtime) / FREQ);
+						Hist.h.hEN[3]->Fill(Evt->ns, Evt->es);
+						Hist.h.hESEP[3]->Fill(Evt->es, Evt->ep);
+						FillXYZ(Evt, 3);
+						FillN(event, Evt->t, 1);
+						Cnt[5]++;
+						break;
+					case 2:
+						Hist.h.hT[3]->Fill((Evt->gtime - EvtOld->gtime) / FREQ);
+						Hist.h.hEN[4]->Fill(Evt->ns, Evt->es);
+						Hist.h.hESEP[4]->Fill(Evt->es, Evt->ep);
+						FillXYZ(Evt, 4);
+						FillN(event, Evt->t, 2);
+						Cnt[6]++;
+						break;
 					}
 					EvWin++;
 				}
 			} else {
-				if (Evt->ep > E1MIN) memcpy(EvtOld, Evt, sizeof(event_struct));
+				if (Evt->ep > E1MIN) memcpy(EvtOld, Evt, EESIZE);
 				Hist.h.hM->Fill(1.0 * EvWin);
 				EvWin = 0;
 			}
