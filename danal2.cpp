@@ -17,7 +17,7 @@
 #define MAXTDIFF	50
 #define FREQ		125.0
 #define E1MIN		1.0
-#define E2MIN		3.0
+#define E2MIN		4.0
 #define SHEIGHT		1.0
 #define SWIDTH		4.0
 #define VETOEMIN	1.0
@@ -200,9 +200,10 @@ void FillR(struct event_struct *Evt, struct event_struct *EvtOld)
 	float R;
 	
 	R = 0;
-	if (Evt->x > 0 && EvtOld->x > 0) R += (Evt->x - EvtOld->x) * (Evt->x - EvtOld->x);
-	if (Evt->y > 0 && EvtOld->y > 0) R += (Evt->y - EvtOld->y) * (Evt->y - EvtOld->y);
-	if (Evt->z > 0 && EvtOld->z > 0) R += (Evt->z - EvtOld->z) * (Evt->z - EvtOld->z);
+	if (Evt->x <= 0 || EvtOld->x <= 0 || Evt->y <= 0 || EvtOld->y <= 0 || Evt->z <= 0 || EvtOld->z <= 0) return;
+	R += (Evt->x - EvtOld->x) * (Evt->x - EvtOld->x);	
+	R += (Evt->y - EvtOld->y) * (Evt->y - EvtOld->y);
+	R += (Evt->z - EvtOld->z) * (Evt->z - EvtOld->z);
 	R = sqrt(R);
 	Hist.h.hR->Fill(R);
 }
