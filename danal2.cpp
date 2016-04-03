@@ -18,7 +18,6 @@
 #define FREQ		125.0
 #define E1MIN		1.0
 #define E2MIN		3.0
-#define EMAX		10.0
 #define SHEIGHT		1.0
 #define SWIDTH		4.0
 #define VETOEMIN	1.0
@@ -55,6 +54,7 @@ struct event_struct {
 	float es;		// SiPM energy
 	float ep;		// PMT energy
 	float ev;		// VETO energy
+	float ee;		// Positron energy
 	float t;		// precise time
 	float x;		// x, y, z of the vertex
 	float y;
@@ -80,6 +80,8 @@ union hist_union {
 		TH2D *mYZ[5];
 		TH1D *hM;
 		TH1D *hV;
+		TH1D *hR;
+		TH1D *hE;
 	} h;
 } Hist;
 
@@ -151,6 +153,8 @@ void BookHist(void)
 
 	Hist.h.hM = new TH1D("hM", "Number of events in time window (50 us)", 20, 0, 20);
 	Hist.h.hV = new TH1D("hV", "Veto energy", 100, 0, 10);
+	Hist.h.hR = new TH1D("hR", "Distance between 1st and 2nd events;cm", 25, 0, 100);
+	Hist.h.hE = new TH1D("hE", "\"Positron\" energy", 25, 0, 10);
 }
 
 void CalculateEventParameters(struct event_struct *Evt)
@@ -189,6 +193,34 @@ void CalculateEventParameters(struct event_struct *Evt)
 	if (sex > 0) Evt->x /= sex;
 	if (sey > 0) Evt->y /= sey;
 	if (sex + sey > 0) Evt->z /= sex + sey;
+}
+
+void FillR(struct event_struct *Evt, struct event_struct *EvtOld)
+{
+	float R;
+	
+	R = 0;
+	if (Evt->x > 0 && EvtOld->x > 0) R += (Evt->x - EvtOld->x) * (Evt->x - EvtOld->x);
+	if (Evt->y > 0 && EvtOld->y > 0) R += (Evt->y - EvtOld->y) * (Evt->y - EvtOld->y);
+	if (Evt->z > 0 && EvtOld->z > 0) R += (Evt->z - EvtOld->z) * (Evt->z - EvtOld->z);
+	R = sqrt(R);
+	Hist.h.hR->Fill(R);
+}
+
+void FillN(struct pre_event_struct *event, float event_time, int num)
+{
+	struct chan_def_struct *chan;
+	struct pre_hit_struct *hit;
+	float delta;
+	int i;
+
+	for(i=0; i<event->nhits; i++) {
+		hit = &event->hit[i];
+		if (hit->mod < 1 || hit->mod > MAXWFD || hit->chan < 0 || hit->chan > 63) continue;
+		chan = &Map[hit->mod-1][hit->chan];
+		delta = hit->time - chan->dt - event_time;
+		Hist.h.hDtn[num][hit->mod - 1]->Fill(delta);
+	}
 }
 
 void FillXYZ(struct event_struct *Evt, int num)
@@ -230,22 +262,6 @@ void FilterAndCopy(struct event_struct *Evt, struct pre_event_struct *event)
 		Evt->hit[Evt->nhits].xy   = chan->xy;
 		Evt->hit[Evt->nhits].z    = chan->z;
 		Evt->nhits++;
-	}
-}
-
-void FillN(struct pre_event_struct *event, float event_time, int num)
-{
-	struct chan_def_struct *chan;
-	struct pre_hit_struct *hit;
-	float delta;
-	int i;
-
-	for(i=0; i<event->nhits; i++) {
-		hit = &event->hit[i];
-		if (hit->mod < 1 || hit->mod > MAXWFD || hit->chan < 0 || hit->chan > 63) continue;
-		chan = &Map[hit->mod-1][hit->chan];
-		delta = hit->time - chan->dt - event_time;
-		Hist.h.hDtn[num][hit->mod - 1]->Fill(delta);
 	}
 }
 
@@ -344,6 +360,41 @@ int ReadMap(const char *fname)
 	fclose(f);
 	printf("%s: %d channels found\n", fname, cnt);
 	return 0;
+}
+
+void TryAsPositron(struct event_struct *Evt)
+{
+	int i, j;
+	float A;
+	float sex, sey, ex, ey, ez;	
+
+//	Find MAX SiPM
+	A = 0;
+	j = -1;
+	for (i=0; i<Evt->nhits; i++) if (Evt->hit[i].type == TYPE_SIPM && Evt->hit[i].amp > A) {
+		A = Evt->hit[i].amp;
+		j = i;
+	}
+	if (j < 0) return;
+	
+	sex = sey = 0;
+	ex = ey = ez =0;
+	for (i=0; i<Evt->nhits; i++) if (Evt->hit[i].type == TYPE_SIPM && 
+		((Evt->hit[i].proj == Evt->hit[j].proj && Evt->hit[i].z == Evt->hit[j].z && abs(Evt->hit[i].xy - Evt->hit[j].xy) <= 1) ||
+		 (Evt->hit[i].proj != Evt->hit[j].proj && abs(Evt->hit[i].z - Evt->hit[j].z) <= 1))) {
+		Evt->ee += Evt->hit[i].amp;
+		if (Evt->hit[i].proj) {
+			ex += Evt->hit[i].amp * Evt->hit[i].xy * SWIDTH;
+			sex += Evt->hit[i].amp * SWIDTH;
+		} else {
+			ey += Evt->hit[i].amp * Evt->hit[i].xy * SWIDTH;
+			sey += Evt->hit[i].amp * SWIDTH;
+		}
+		ez += Evt->hit[i].amp * Evt->hit[i].z * SHEIGHT;
+	}
+	Evt->x = (sex > 0) ? ex / sex : 0;
+	Evt->y = (sey > 0) ? ey / sey : 0;
+	Evt->z = (sex + sey > 0) ? ez / (sex + sey) : 0;	
 }
 
 int main(int argc, char**argv)
@@ -457,6 +508,8 @@ int main(int argc, char**argv)
 						Hist.h.mXZ[2]->Fill(Evt->x, Evt->z);
 						Hist.h.mYZ[2]->Fill(Evt->y, Evt->z);
 						FillN(event, Evt->t, 0);
+						FillR(Evt, EvtOld);
+						Hist.h.hE->Fill(EvtOld->ee);
 						Cnt[4]++;
 						break;
 					case 1:
@@ -483,7 +536,8 @@ int main(int argc, char**argv)
 					EvWin++;
 				}
 			} else {
-				if (Evt->ep > E1MIN && Evt->es > E1MIN) memcpy(EvtOld, Evt, EESIZE);
+				TryAsPositron(Evt);
+				if (Evt->ep > E1MIN && Evt->es > E1MIN && Evt->ee > E1MIN) memcpy(EvtOld, Evt, EESIZE);
 				Hist.h.hM->Fill(1.0 * EvWin);
 				EvWin = 0;
 			}
