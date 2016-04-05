@@ -63,6 +63,7 @@ struct common_data_struct {
 	int ErrorCnt;		// count data errors
 //		histogramms etc to show
 	TH1D *hWaveForm;	// Waveform to show
+	int thisWaveFormCnt;	// current waveform number
 	TH2D *hAmpS[MAXWFD];	// amplitude versus channel - self trigger
 	TH2D *hAmpE[MAXWFD];	// amplitude versus channel - events
 	TH2D *hTimeA[MAXWFD];	// time versus channel - events, no threshold
@@ -263,6 +264,7 @@ public:
 	void PlayFileStop(void);
 	void SaveDialog(void);
 	void SaveEvent(void);
+	void SaveWaveForm(void);
 	friend void *DataThreadFunction(void *ptr);
 	ClassDef(dshowMainFrame, 0)
 };

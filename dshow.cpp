@@ -304,8 +304,12 @@ void dshowMainFrame::CreateWaveTab(TGTab *tab)
 
 	fWaveCanvas = new TRootEmbeddedCanvas ("ScopeCanvas", me, 1600, 800);
    	me->AddFrame(fWaveCanvas, new TGLayoutHints(kLHintsExpandX | kLHintsExpandY, 10, 10, 10, 1));
-
    	TGHorizontalFrame *hframe=new TGHorizontalFrame(me);
+
+   	TGTextButton *save = new TGTextButton(hframe,"&Save");
+	save->Connect("Clicked()", "dshowMainFrame", this, "SaveWaveForm()");
+   	hframe->AddFrame(save, new TGLayoutHints(kLHintsCenterY | kLHintsLeft, 5, 5, 3, 4));
+
 	TGButtonGroup *bg = new TGButtonGroup(hframe, "WaveForm", kHorizontalFrame);
 	rWaveSelf = new TGRadioButton(bg, "&Self   ");
 	rWaveTrig = new TGRadioButton(bg, "&Event  ");
@@ -1008,6 +1012,13 @@ void dshowMainFrame::SaveEvent(void)
 	fEventCanvas->GetCanvas()->Print(str);	
 }
 
+void dshowMainFrame::SaveWaveForm(void)
+{
+	char str[1024];
+	sprintf(str, "%s/wave_%d.jpg", SaveFile->fIniDir, CommonData->thisWaveFormCnt);
+	fWaveCanvas->GetCanvas()->Print(str);	
+}
+
 /*	Process an event					*/
 void dshowMainFrame::ProcessEvent(char *data)
 {
@@ -1066,6 +1077,7 @@ void dshowMainFrame::ProcessEvent(char *data)
 				CommonData->hWaveForm = new TH1D("hWave", strl, rec->len - 2, 0, NSPERCHAN * (rec->len - 2));
 				CommonData->hWaveForm->SetStats(0);
 				for (i = 0; i < rec->len - 2; i++) CommonData->hWaveForm->SetBinContent(i + 1, (double) rec->d[i+1]);
+				CommonData->thisWaveFormCnt = CommonData->EventCnt;
 			}
 			CommonData->hAmpE[mod-1]->Fill((double)chan, (double)amp);
 			CommonData->hTimeA[mod-1]->Fill((double)chan, t);
