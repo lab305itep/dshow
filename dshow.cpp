@@ -1849,7 +1849,7 @@ float FindHalfTime(short int *data, int cnt, int amp)
 	int i;
 	float r;
 	for (i=0; i<cnt; i++) if (data[i] > amp/2) break;
-	if (!i) return 0;
+	if (!i || i == cnt) return 0;
 	r = amp;
 	r = (r/2 - data[i-1]) / (data[i] - data[i-1]);
 	return i + r - 1;
