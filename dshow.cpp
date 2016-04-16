@@ -87,10 +87,10 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h, const char
 		CommonData->hAmpE[i] = new TH2D(strs, strl, 64, 0, 64, 248, 128, 4096);
 		snprintf(strs, sizeof(strs), "hTimeA%2.2d", i+1);
 		snprintf(strl, sizeof(strl), "Module %2.2d: time versus channels number, all hits", i+1);
-		CommonData->hTimeA[i] = new TH2D(strs, strl, 64, 0, 64, 100, 0, 800);
+		CommonData->hTimeA[i] = new TH2D(strs, strl, 64, 0, 64, 100, 0, 512);
 		snprintf(strs, sizeof(strs), "hTimeB%2.2d", i+1);
 		snprintf(strl, sizeof(strl), "Module %2.2d: time versus channels number, amplitude above threshold", i+1);
-		CommonData->hTimeB[i] = new TH2D(strs, strl, 64, 0, 64, 100, 0, 800);
+		CommonData->hTimeB[i] = new TH2D(strs, strl, 64, 0, 64, 100, 0, 512);
 		CommonData->hTimeB[i]->SetLineColor(kBlue);
 		snprintf(strs, sizeof(strs), "hTimeC%2.2d", i+1);
 		snprintf(strl, sizeof(strl), "Module %2.2d: time versus channels number relative to common SiPM time, amplitude above threshold", i+1);
@@ -240,6 +240,7 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h, const char
 	grPlay->AddFrame(FileProgress, new TGLayoutHints(kLHintsExpandX  | kLHintsTop, 5, 5, 3, 1));
 
 	Follow = new TGCheckButton(grPlay,"&Follow");
+	Follow->Connect("Clicked()", "dshowMainFrame", this, "Connect2Online()");	
    	grPlay->AddFrame(Follow, new TGLayoutHints(kLHintsCenterX | kLHintsTop, 5, 5, 3, 4));
 
    	vframe->AddFrame(grPlay, new TGLayoutHints(kLHintsCenterX  | kLHintsTop, 5, 5, 3, 4));
@@ -593,7 +594,7 @@ void dshowMainFrame::DoDraw(void)
    	fCanvas = fWaveCanvas->GetCanvas();
    	fCanvas->cd();
 	if (CommonData->hWaveForm) {
-		CommonData->hWaveForm->SetMinimum();
+		CommonData->hWaveForm->SetMinimum(CommonData->hWaveForm->GetMinimum() - 2);
 		CommonData->hWaveForm->SetMarkerSize(2);
 		CommonData->hWaveForm->SetMarkerColor(kBlue);
 		CommonData->hWaveForm->SetMarkerStyle(20);
@@ -893,6 +894,7 @@ void dshowMainFrame::DrawEvent(TCanvas *cv)
 /*	show file open dialog and start thread to play to play selected data file(s)	*/
 void dshowMainFrame::PlayFileDialog(void)
 {
+	Follow->SetState(kButtonUp);
 	PlayFileStop();
 	new TGFileDialog(gClient->GetRoot(), this, kFDOpen, PlayFile);
 
@@ -1529,6 +1531,16 @@ void dshowMainFrame::ResetMuonHists(void)
 	TThread::UnLock();
 }
 
+void dshowMainFrame::Connect2Online(void)
+{
+	PlayFileStop();
+	if (Follow->IsDown()) {
+		CommonData->iStop = 0;
+		DataThread = new TThread("DataThread", DataThreadFunction, (void *) this);
+		DataThread->Run();
+	}
+}
+
 /*	Change TimeB threshold				*/
 void dshowMainFrame::ChangeTimeBThr(void)
 {
@@ -1551,6 +1563,7 @@ void dshowMainFrame::ReadConfig(const char *fname)
 	long tmp;
 #endif
 	double dtmp;
+	char *stmp;
 	int i, j, k, type, xy, z;
 	config_setting_t *ptr_xy;
 	config_setting_t *ptr_z;
@@ -1638,6 +1651,10 @@ void dshowMainFrame::ReadConfig(const char *fname)
 	Pars.tMesoDecay = (config_lookup_float(&cnf, "Dshow.tMesoDecay", &dtmp)) ? dtmp : 5;
 //	NeutronPath = 30;		// Meso atom decay time, us
 	Pars.NeutronPath = (config_lookup_float(&cnf, "Dshow.NeutronPath", &dtmp)) ? dtmp : 30;
+//	int OutPort;			// Out port 0xB230
+	Pars.HostPort = (config_lookup_int(&cnf, "Sink.OutPort", &tmp)) ? tmp : 0xB230;
+//	char MyName[MAXSTR];		// The server host name
+	strncpy(Pars.HostName, (config_lookup_string(&cnf, "Sink.MyName", (const char **) &stmp)) ? stmp : "dserver.danss.local", sizeof(Pars.HostName));
 
 	config_destroy(&cnf);
 }
@@ -1652,7 +1669,7 @@ int dshowMainFrame::neighbors(int xy1, int xy2, int z1, int z2)
 
 /*	Read one record							*/
 /*	Return 1 if OK, negative on error, 0 on the EOF			*/
-/*	If iFollow wait till full record and doesn't retirn on EOF,	*/
+/*	If iFollow wait till full record and doesn't return on EOF,	*/
 /*	otherwise partial record will produce an error.			*/
 /*	Watch for iStop. 						*/
 int GetRecord(char *buf, int buf_size, FILE *f, int iFollow, int *iStop)
@@ -1677,6 +1694,8 @@ int GetRecord(char *buf, int buf_size, FILE *f, int iFollow, int *iStop)
 		if (Cnt != sizeof(int)) return -1;	// Strange amount read
 	}
 
+	if (*iStop) return 0;
+
 	len = *((int *)buf);
 	if (len < sizeof(int) || len > buf_size) return -2;	// strange length
 
@@ -1693,12 +1712,14 @@ int GetRecord(char *buf, int buf_size, FILE *f, int iFollow, int *iStop)
 		}
 		if (Cnt != len) return -3;	// Strange amount read
 	}
+	if (*iStop) return 0;
 	return 1;
 }
 
 /*	Open data file either directly or via zcat etc, depending on the extension	*/
 /*	Return some large length (12G) on compressed files				*/
-FILE* OpenDataFile(const char *fname, off_t *size) {
+FILE* OpenDataFile(const char *fname, off_t *size) 
+{
 	char cmd[1024];
 	FILE *f;
 
@@ -1719,6 +1740,55 @@ FILE* OpenDataFile(const char *fname, off_t *size) {
 			*size = ftello(f);
 			fseek(f, 0, SEEK_SET);
 		}
+	}
+	return f;
+}
+
+/*	Open TCP connection to dsink							*/
+FILE* OpenTCP(const char *hname, int port) 
+{
+	FILE *f;
+	struct hostent *host;
+	struct sockaddr_in hostname;
+	int fd, flags, irc;
+	
+	host = gethostbyname(hname);
+	if (!host) return NULL;
+	
+	hostname.sin_family = AF_INET;
+	hostname.sin_port = htons(port);
+	hostname.sin_addr = *(struct in_addr *) host->h_addr;
+
+	fd = socket(PF_INET, SOCK_STREAM, 0);
+	if (fd < 0) return NULL;
+	
+	flags = 1;
+	irc = setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &flags, sizeof(flags));
+	if (irc) {
+		close(fd);
+		return NULL;
+	}
+
+	if (connect(fd, (struct sockaddr *)&hostname, sizeof(hostname))) {
+		close(fd);
+		return NULL;
+	}
+        flags = fcntl (fd, F_GETFL, 0);
+	if (flags == -1) {
+		close(fd);
+		return NULL;
+
+	}
+        flags |= O_NONBLOCK;
+        irc = fcntl(fd, F_SETFL, flags);
+	if (irc == -1) {
+		close(fd);
+		return NULL;
+	}
+	f = fdopen(fd, "rb");
+	if (!f) {
+		close(fd);
+		return NULL;
 	}
 	return f;
 }
@@ -1753,19 +1823,27 @@ void *DataThreadFunction(void *ptr)
 	}
 	head = (struct rec_header_struct *) buf;
 	
-	f = Main->PlayFile->fFileNamesList->First();
-	fIn = OpenDataFile(f->GetName(), &fsize);
+	if (Main->Follow->IsDown()) {
+		fIn = OpenTCP(Main->Pars.HostName, Main->Pars.HostPort);
+		nFiles = 0;
+		fsize = 0;
+		snprintf(str, sizeof(str), "Online(%s:%d)", Main->Pars.HostName, Main->Pars.HostPort);
+	} else {
+		f = Main->PlayFile->fFileNamesList->First();
+		fIn = OpenDataFile(f->GetName(), &fsize);
+		nFiles = Main->PlayFile->fFileNamesList->GetEntries();
+		snprintf(str, sizeof(str), "%s (%d/%d)", f->GetName(), FileCnt + 1, nFiles);
+	}
 	if (!fIn) {
 		CommonData->iError = 15;
+		if (Main->Follow->IsDown()) Main->Follow->SetState(kButtonUp);
 		goto Ret;
 	}
+	Main->fStatusBar->SetText(str, 5);
 	iNum = Main->nPlayBlocks->GetIntNumber();
 	FileCnt = 0;
-	nFiles = Main->PlayFile->fFileNamesList->GetEntries();
 	Main->PlayProgress->SetPosition(0);
 	Main->FileProgress->SetPosition(0);
-	snprintf(str, sizeof(str), "%s (%d/%d)", f->GetName(), FileCnt + 1, nFiles);
-	Main->fStatusBar->SetText(str, 5);
 	rsize = 0;
 	Cnt = 0;
 	
@@ -1774,7 +1852,10 @@ void *DataThreadFunction(void *ptr)
 		if (irc < 0) {
 			CommonData->iError = -irc;
 			break;
+		} else if (CommonData->iStop) {
+			break;
 		} else if (irc == 0) {
+			if (Main->Follow->IsDown()) continue;
 			//	check if we have file after
 			FileCnt++;
 			Main->PlayProgress->SetPosition(0);
@@ -1783,6 +1864,7 @@ void *DataThreadFunction(void *ptr)
 				f = Main->PlayFile->fFileNamesList->After(f);
 				snprintf(str, sizeof(str), "%s (%d/%d)", f->GetName(), FileCnt + 1, nFiles);
 				Main->fStatusBar->SetText(str, 5);
+				fclose(fIn);
 				fIn = OpenDataFile(f->GetName(), &fsize);
 				if (!fIn) {
 					CommonData->iError = 25;
@@ -1824,13 +1906,16 @@ void *DataThreadFunction(void *ptr)
 		if ((iNum > 0 && Cnt >= iNum) || (iNum == 0 && Cnt >= 20000)) {
 			if (iNum > 0) sleep(1);
 			iNum = Main->nPlayBlocks->GetIntNumber();
-			if (fsize) Main->PlayProgress->SetPosition(100.0*rsize/fsize);
-			snprintf(str, sizeof(str), "%s (%d/%d)", f->GetName(), FileCnt + 1, nFiles);
-			Main->fStatusBar->SetText(str, 5);
+			if (!Main->Follow->IsDown()) {
+				if (fsize) Main->PlayProgress->SetPosition(100.0*rsize/fsize);
+				snprintf(str, sizeof(str), "%s (%d/%d)", f->GetName(), FileCnt + 1, nFiles);
+				Main->fStatusBar->SetText(str, 5);
+			}
 			Cnt = 0;
 		}	
 	}
 Ret:
+	if (fIn) fclose(fIn);
 	Main->fStatusBar->SetText("", 5);
 	if (buf) free(buf);
 	return NULL;

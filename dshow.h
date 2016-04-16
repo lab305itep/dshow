@@ -128,6 +128,8 @@ struct channel_struct {
 #define CUT_PFRACTION	13.5
 
 struct select_parm_struct {
+	char  HostName[256];
+	int HostPort;
 //	Positron cuts
 	float eHitMin;
 	float ePosMin;
@@ -257,6 +259,7 @@ public:
 	void ResetTagHists(void);
 	void ResetNeutrinoHists(void);
 	void ResetMuonHists(void);
+	void Connect2Online(void);
 	void ChangeTimeBThr(void);
 	void ChangeSummaPars(void);
 	void OnTimer(void);
