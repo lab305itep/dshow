@@ -31,6 +31,7 @@
 #include <TSystem.h>
 #include <TText.h>
 #include <TThread.h>
+#include <errno.h>
 #include <arpa/inet.h>
 #include <libconfig.h>
 #include <math.h>
@@ -1677,25 +1678,25 @@ int GetRecord(char *buf, int buf_size, FILE *f, int iFollow, int *iStop)
 	int Cnt;
 	int irc;
 	int len;
-	int sleepcnt;
 	struct timeval tm;
 //		Read length
 	Cnt = 0;
-	sleepcnt = 0;
 	while (!(*iStop) && Cnt < sizeof(int)) {
-		if (sleepcnt > 50) return 0;
 		irc = fread(&buf[Cnt], 1, sizeof(int) - Cnt, f);
-		if (irc < 0) return irc;	// Error
-		Cnt += irc;
-		if (Cnt < sizeof(int) && iFollow) {
-			tm.tv_sec = 0;		// do some sleep and try to get more data
-			tm.tv_usec = 200000;
-			select(FD_SETSIZE, NULL, NULL, NULL, &tm);
-			sleepcnt++;
-			continue;
+		if (irc < 0) {
+			if (errno == EAGAIN) continue;
+			return irc;	// Error
+		} else if (irc == 0) {
+			if (iFollow) {
+				tm.tv_sec = 0;		// do some sleep and try to get more data
+				tm.tv_usec = 200000;
+				select(FD_SETSIZE, NULL, NULL, NULL, &tm);
+				continue;				
+			} else {
+				return 0;
+			}
 		}
-		if (!Cnt) return 0;		// EOF
-		if (Cnt != sizeof(int)) return -1;	// Strange amount read
+		Cnt += irc;
 	}
 
 	if (*iStop) return 0;
@@ -1706,13 +1707,15 @@ int GetRecord(char *buf, int buf_size, FILE *f, int iFollow, int *iStop)
 //		Read the rest
 	while (!(*iStop) && Cnt < len) {
 		irc = fread(&buf[Cnt], 1, len - Cnt, f);
-		if (irc < 0) return irc;	// Error
+		if (irc < 0) {
+			if (errno == EAGAIN) continue;
+			return irc;	// Error
+		}
 		Cnt += irc;
 		if (Cnt < len && iFollow) {
 			tm.tv_sec = 0;		// do some sleep and try to get more data
 			tm.tv_usec = 200000;
 			select(FD_SETSIZE, NULL, NULL, NULL, &tm);			
-			sleepcnt++;
 			continue;
 		}
 		if (Cnt != len) return -3;	// Strange amount read
@@ -1764,29 +1767,10 @@ FILE* OpenTCP(const char *hname, int port)
 	hostname.sin_port = htons(port);
 	hostname.sin_addr = *(struct in_addr *) host->h_addr;
 
-	fd = socket(PF_INET, SOCK_STREAM, 0);
+	fd = socket(PF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
 	if (fd < 0) return NULL;
 	
-	flags = 1;
-	irc = setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &flags, sizeof(flags));
-	if (irc) {
-		close(fd);
-		return NULL;
-	}
-
 	if (connect(fd, (struct sockaddr *)&hostname, sizeof(hostname))) {
-		close(fd);
-		return NULL;
-	}
-        flags = fcntl (fd, F_GETFL, 0);
-	if (flags == -1) {
-		close(fd);
-		return NULL;
-
-	}
-        flags |= O_NONBLOCK;
-        irc = fcntl(fd, F_SETFL, flags);
-	if (irc == -1) {
 		close(fd);
 		return NULL;
 	}
