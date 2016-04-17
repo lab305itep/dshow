@@ -1677,17 +1677,21 @@ int GetRecord(char *buf, int buf_size, FILE *f, int iFollow, int *iStop)
 	int Cnt;
 	int irc;
 	int len;
+	int sleepcnt;
 	struct timeval tm;
 //		Read length
 	Cnt = 0;
+	sleepcnt = 0;
 	while (!(*iStop) && Cnt < sizeof(int)) {
+		if (sleepcnt > 50) return 0;
 		irc = fread(&buf[Cnt], 1, sizeof(int) - Cnt, f);
 		if (irc < 0) return irc;	// Error
 		Cnt += irc;
 		if (Cnt < sizeof(int) && iFollow) {
 			tm.tv_sec = 0;		// do some sleep and try to get more data
 			tm.tv_usec = 200000;
-			select(FD_SETSIZE, NULL, NULL, NULL, &tm);			
+			select(FD_SETSIZE, NULL, NULL, NULL, &tm);
+			sleepcnt++;
 			continue;
 		}
 		if (!Cnt) return 0;		// EOF
@@ -1708,6 +1712,7 @@ int GetRecord(char *buf, int buf_size, FILE *f, int iFollow, int *iStop)
 			tm.tv_sec = 0;		// do some sleep and try to get more data
 			tm.tv_usec = 200000;
 			select(FD_SETSIZE, NULL, NULL, NULL, &tm);			
+			sleepcnt++;
 			continue;
 		}
 		if (Cnt != len) return -3;	// Strange amount read
@@ -1855,26 +1860,36 @@ void *DataThreadFunction(void *ptr)
 		} else if (CommonData->iStop) {
 			break;
 		} else if (irc == 0) {
-			if (Main->Follow->IsDown()) continue;
-			//	check if we have file after
-			FileCnt++;
-			Main->PlayProgress->SetPosition(0);
-			Main->FileProgress->SetPosition(FileCnt * 100.0 / nFiles);
-			if (Main->PlayFile->fFileNamesList->After(f)) {
-				f = Main->PlayFile->fFileNamesList->After(f);
-				snprintf(str, sizeof(str), "%s (%d/%d)", f->GetName(), FileCnt + 1, nFiles);
-				Main->fStatusBar->SetText(str, 5);
+			if (Main->Follow->IsDown()) {
 				fclose(fIn);
-				fIn = OpenDataFile(f->GetName(), &fsize);
-				if (!fIn) {
-					CommonData->iError = 25;
-					goto Ret;
+				fIn = NULL;
+				while (!fIn) {
+					sleep(1);
+					if (CommonData->iStop || !Main->Follow->IsDown()) break;
+					fIn = OpenTCP(Main->Pars.HostName, Main->Pars.HostPort);
 				}
-				rsize = 0;
-				Cnt = 0;
 				continue;
 			} else {
-				break;
+				//	check if we have file after
+				FileCnt++;
+				Main->PlayProgress->SetPosition(0);
+				Main->FileProgress->SetPosition(FileCnt * 100.0 / nFiles);
+				if (Main->PlayFile->fFileNamesList->After(f)) {
+					f = Main->PlayFile->fFileNamesList->After(f);
+					snprintf(str, sizeof(str), "%s (%d/%d)", f->GetName(), FileCnt + 1, nFiles);
+					Main->fStatusBar->SetText(str, 5);
+					fclose(fIn);
+					fIn = OpenDataFile(f->GetName(), &fsize);
+					if (!fIn) {
+						CommonData->iError = 25;
+						break;
+					}
+					rsize = 0;
+					Cnt = 0;
+					continue;
+				} else {
+					break;
+				}
 			}
 		}
 		rsize += head->len;
