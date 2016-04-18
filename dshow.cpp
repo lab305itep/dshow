@@ -1767,16 +1767,16 @@ FILE* OpenTCP(const char *hname, int port)
 	hostname.sin_port = htons(port);
 	hostname.sin_addr = *(struct in_addr *) host->h_addr;
 
-	fd = socket(PF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
+	fd = socket(PF_INET, SOCK_STREAM, 0);
 	if (fd < 0) return NULL;
 	
 	if (connect(fd, (struct sockaddr *)&hostname, sizeof(hostname))) {
 		close(fd);
 		return NULL;
 	}
-	f = fdopen(fd, "rb");
+	f = fdopen(fd, "r");
 	if (!f) {
-		close(fd);
+		shutdown(fd, 2);
 		return NULL;
 	}
 	return f;
