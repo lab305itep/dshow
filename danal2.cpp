@@ -16,8 +16,9 @@
 #define TCUT		12.5
 #define MAXTDIFF	50
 #define FREQ		125.0
-#define E1MIN		1.0
-#define E2MIN		4.0
+#define E1MIN		2.0
+#define E1GAMMA		0.2
+#define E2MIN		5.0
 #define SHEIGHT		1.0
 #define SWIDTH		4.0
 #define VETOEMIN	1.0
@@ -51,6 +52,7 @@ struct event_struct {
 	int ns;			// number of strips
 	int np;			// number of PMT
 	int nv;			// number of VETO
+	int ng;			// number of gammas
 	float es;		// SiPM energy
 	float ep;		// PMT energy
 	float ev;		// VETO energy
@@ -82,6 +84,7 @@ union hist_union {
 		TH1D *hV;
 		TH1D *hR;
 		TH1D *hE;
+		TH1D *hNG;
 	} h;
 } Hist;
 
@@ -155,6 +158,7 @@ void BookHist(void)
 	Hist.h.hV = new TH1D("hV", "Veto energy", 100, 0, 10);
 	Hist.h.hR = new TH1D("hR", "Distance between 1st and 2nd events;cm", 25, 0, 100);
 	Hist.h.hE = new TH1D("hE", "\"Positron\" energy", 25, 0, 10);
+	Hist.h.hNG = new TH1D("hNG", "Number of \"gammas\"", 10, 0, 10);
 }
 
 void CalculateEventParameters(struct event_struct *Evt)
@@ -380,18 +384,21 @@ void TryAsPositron(struct event_struct *Evt)
 	
 	sex = sey = 0;
 	ex = ey = ez =0;
-	for (i=0; i<Evt->nhits; i++) if (Evt->hit[i].type == TYPE_SIPM && 
-		((Evt->hit[i].proj == Evt->hit[j].proj && Evt->hit[i].z == Evt->hit[j].z && abs(Evt->hit[i].xy - Evt->hit[j].xy) <= 1) ||
-		 (Evt->hit[i].proj != Evt->hit[j].proj && abs(Evt->hit[i].z - Evt->hit[j].z) <= 1))) {
-		Evt->ee += Evt->hit[i].amp;
-		if (Evt->hit[i].proj) {
-			ex += Evt->hit[i].amp * Evt->hit[i].xy * SWIDTH;
-			sex += Evt->hit[i].amp * SWIDTH;
+	for (i=0; i<Evt->nhits; i++) if (Evt->hit[i].type == TYPE_SIPM) {
+		if ((Evt->hit[i].proj == Evt->hit[j].proj && Evt->hit[i].z == Evt->hit[j].z && abs(Evt->hit[i].xy - Evt->hit[j].xy) <= 1) ||
+			(Evt->hit[i].proj != Evt->hit[j].proj && abs(Evt->hit[i].z - Evt->hit[j].z) <= 1)) {
+			Evt->ee += Evt->hit[i].amp;
+			if (Evt->hit[i].proj) {
+				ex += Evt->hit[i].amp * Evt->hit[i].xy * SWIDTH;
+				sex += Evt->hit[i].amp * SWIDTH;
+			} else {
+				ey += Evt->hit[i].amp * Evt->hit[i].xy * SWIDTH;
+				sey += Evt->hit[i].amp * SWIDTH;
+			}
+			ez += Evt->hit[i].amp * Evt->hit[i].z * SHEIGHT;
 		} else {
-			ey += Evt->hit[i].amp * Evt->hit[i].xy * SWIDTH;
-			sey += Evt->hit[i].amp * SWIDTH;
+			if (Evt->hit[i].amp > E1GAMMA) Evt->ng++;
 		}
-		ez += Evt->hit[i].amp * Evt->hit[i].z * SHEIGHT;
 	}
 	Evt->x = (sex > 0) ? ex / sex : 0;
 	Evt->y = (sey > 0) ? ey / sey : 0;
@@ -511,6 +518,7 @@ int main(int argc, char**argv)
 						FillN(event, Evt->t, 0);
 						FillR(Evt, EvtOld);
 						Hist.h.hE->Fill(EvtOld->ee);
+						Hist.h.hNG->Fill(EvtOld->ng);
 						Cnt[4]++;
 						break;
 					case 1:
