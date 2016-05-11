@@ -172,7 +172,7 @@ void BookHist(void)
 	for(i=0; i<sizeof(Hist.h.hEMaxN) / sizeof(Hist.h.hEMaxN[0]); i++) {
 		sprintf(strs, "hEMaxN%d", i);
 		sprintf(strl, "Energy distribution of %d-th hit from \"neutron\"", i+1);
-		Hist.h.hEMaxN[i] = new TH1D(strs, strl, 60, 0, 3);
+		Hist.h.hEMaxN[i] = new TH1D(strs, strl, 120, 0, 6);
 	}
 }
 
@@ -471,6 +471,7 @@ int main(int argc, char**argv)
 	struct pre_event_struct *event;
 	struct event_struct *Evt;
 	struct event_struct *EvtOld;
+	int GEvtCnt;
 	int i, j, irc;
 	long long tbegin, tsum;
 	int EvWin;
@@ -513,6 +514,7 @@ int main(int argc, char**argv)
 	BookHist();
 		
 	for (j=1; j<argc; j++) {
+		GEvtCnt = 0;
 		fIn = fopen(argv[j], "rb");
 		if (!fIn) {
 			printf("Can not open input file %s: %m\n", argv[j]);
@@ -580,6 +582,7 @@ int main(int argc, char**argv)
 						Hist.h.hNC->Fill(EvtOld->nc);
 						FillEMaxN(Evt);
 						Cnt[4]++;
+						GEvtCnt++;
 						if (FinalSelection(Evt, EvtOld)) {
 							Hist.h.hEE->Fill(EvtOld->ee);
 							Cnt[8]++;
@@ -615,7 +618,7 @@ int main(int argc, char**argv)
 				EvWin = 0;
 			}
 		}
-		printf("End: %s", ctime(&systime));
+		printf("%d events. End: %s", GEvtCnt, ctime(&systime));
 		tsum += event->gtime - tbegin;
 		fclose(fIn);
 	}
