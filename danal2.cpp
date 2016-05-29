@@ -13,7 +13,7 @@
 #define MINSIPM4TIME	60
 #define MINPMT4TIME	20
 #define PMT2SIPM4TIME	2
-#define TCUT		12.5
+#define TCUT		15
 #define MAXTDIFF	50
 #define FREQ		125.0
 #define E1MIN		1.0
@@ -24,6 +24,8 @@
 #define VETOEMIN	1.0
 #define VETONMIN	2
 #define SIPMAMIN	30
+#define NEUTRONR	25
+#define ECORR		1
 
 struct chan_def_struct {
 	char type;		// type = 0: SiPM, 1: PMT, 2: VETO
@@ -59,10 +61,12 @@ struct event_struct {
 	float ep;		// PMT energy
 	float ev;		// VETO energy
 	float ee;		// Positron energy
+	float en;		// "neutron" energy
 	float t;		// precise time
 	float x;		// x, y, z of the vertex
 	float y;
 	float z;
+	float rn;		// "neutron" radius
 	struct hit_struct hit[0];
 };
 
@@ -90,6 +94,8 @@ union hist_union {
 		TH1D *hNC;
 		TH1D *hEMaxN[10];
 		TH1D *hEE;
+		TH1D *hNE;
+		TH1D *hNR;
 	} h;
 } Hist;
 
@@ -166,8 +172,11 @@ void BookHist(void)
 	Hist.h.hR = new TH1D("hR", "Distance between 1st and 2nd events;cm", 34, 0, 170);
 	Hist.h.hE = new TH1D("hE", "\"Positron\" energy", 40, 0, 10);
 	Hist.h.hEE = new TH1D("hEE", "\"Positron\" energy for selected events", 40, 0, 10);
+	Hist.h.hNE = new TH1D("hNE", "\"Neutron\" energy for selected events", 40, 0, 10);
+	Hist.h.hNR = new TH1D("hNR", "\"Neutron radius\"  for selected events", 25, 0, 100);
 	Hist.h.hNC = new TH1D("hNC", "Number of strips in \"Positron\" cluster", 10, 0, 10);
 	Hist.h.hNG = new TH1D("hNG", "Number of \"gammas\"", 10, 0, 10);
+	
 
 	for(i=0; i<sizeof(Hist.h.hEMaxN) / sizeof(Hist.h.hEMaxN[0]); i++) {
 		sprintf(strs, "hEMaxN%d", i);
@@ -178,12 +187,13 @@ void BookHist(void)
 
 void CalculateEventParameters(struct event_struct *Evt)
 {
-	int i;
-	int sex, sey;	
+	int i, k;
+	int sex, sey;
+	float r2;
 
-	Evt->es = Evt->ep = Evt->ev = 0;
+	Evt->es = Evt->ep = Evt->ev = Evt->en = 0;
 	Evt->ns = Evt->np = Evt->nv = 0;
-	Evt->x = Evt->y = Evt->z = 0;
+	Evt->x = Evt->y = Evt->z = Evt->rn = 0;
 	sex = sey = 0;
 	for (i=0; i<Evt->nhits; i++) {
 		switch(Evt->hit[i].type) {
@@ -212,6 +222,18 @@ void CalculateEventParameters(struct event_struct *Evt)
 	if (sex > 0) Evt->x /= sex; else Evt->x = -1;
 	if (sey > 0) Evt->y /= sey; else Evt->y = -1;
 	if (sex + sey > 0) Evt->z /= sex + sey; else Evt->z = -1;
+
+	k = 0;
+	for (i=0; i<Evt->nhits; i++) if(Evt->hit[i].type == TYPE_SIPM) {
+		r2 = Evt->hit[i].xy * SWIDTH - ((Evt->hit[i].proj) ? Evt->x : Evt->y);
+		r2 *= r2;
+		r2 += (Evt->hit[i].z * SHEIGHT - Evt->z) * (Evt->hit[i].z * SHEIGHT - Evt->z);
+		Evt->rn += r2;
+		k++;
+		if (r2 < NEUTRONR * NEUTRONR) Evt->en += Evt->hit[i].amp;
+	}
+	if (k) Evt->rn /= k;
+	Evt->rn = sqrt(Evt->rn);
 }
 
 void FillEMaxN(struct event_struct *Evt)
@@ -293,6 +315,7 @@ void FilterAndCopy(struct event_struct *Evt, struct pre_event_struct *event)
 		if (fabs(delta) > TCUT) continue;
 		Evt->hit[Evt->nhits].time = hit->time - chan->dt;
 		Evt->hit[Evt->nhits].amp  = hit->amp * chan->ecoef;
+		if (chan->type == TYPE_SIPM) Evt->hit[Evt->nhits].amp *= ECORR;
 		Evt->hit[Evt->nhits].type = chan->type;
 		Evt->hit[Evt->nhits].proj = chan->proj;
 		Evt->hit[Evt->nhits].xy   = chan->xy;
@@ -585,6 +608,8 @@ int main(int argc, char**argv)
 						GEvtCnt++;
 						if (FinalSelection(Evt, EvtOld)) {
 							Hist.h.hEE->Fill(EvtOld->ee);
+							Hist.h.hNE->Fill(Evt->en);
+							Hist.h.hNR->Fill(Evt->rn);
 							Cnt[8]++;
 						}
 						break;
