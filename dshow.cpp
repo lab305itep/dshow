@@ -1687,8 +1687,8 @@ int GetRecord(char *buf, int buf_size, FILE *f, int iFollow, int *iStop)
 	while (!(*iStop) && Cnt < sizeof(int)) {
 		irc = fread(&buf[Cnt], 1, sizeof(int) - Cnt, f);
 		if (irc < 0) {
-			if (errno == EAGAIN) continue;
-			return irc;	// Error
+			if (errno == EAGAIN || errno == EINTR) continue;
+			return (iFollow) ? 0 : irc;	// Error 
 		} else if (irc == 0) {
 			if (iFollow) {
 				tm.tv_sec = 0;		// do some sleep and try to get more data
@@ -1711,8 +1711,8 @@ int GetRecord(char *buf, int buf_size, FILE *f, int iFollow, int *iStop)
 	while (!(*iStop) && Cnt < len) {
 		irc = fread(&buf[Cnt], 1, len - Cnt, f);
 		if (irc < 0) {
-			if (errno == EAGAIN) continue;
-			return irc;	// Error
+			if (errno == EAGAIN || errno == EINTR) continue;
+			return (iFollow) ? 0 : irc;	// Error
 		}
 		Cnt += irc;
 		if (Cnt < len && iFollow) {
