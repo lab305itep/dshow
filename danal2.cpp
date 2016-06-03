@@ -13,15 +13,19 @@
 #define MINSIPM4TIME	60
 #define MINPMT4TIME	20
 #define PMT2SIPM4TIME	2
-#define TCUT		12.5
+#define TCUT		15
 #define MAXTDIFF	50
 #define FREQ		125.0
 #define E1MIN		1.0
-#define E2MIN		4.0
+#define E1GAMMA		0.2
+#define E2MIN		3.0
 #define SHEIGHT		1.0
 #define SWIDTH		4.0
 #define VETOEMIN	1.0
 #define VETONMIN	2
+#define SIPMAMIN	30
+#define NEUTRONR	25
+#define ECORR		1
 
 struct chan_def_struct {
 	char type;		// type = 0: SiPM, 1: PMT, 2: VETO
@@ -51,14 +55,18 @@ struct event_struct {
 	int ns;			// number of strips
 	int np;			// number of PMT
 	int nv;			// number of VETO
+	int ng;			// number of gammas
+	int nc;			// number of strips in positron cluster
 	float es;		// SiPM energy
 	float ep;		// PMT energy
 	float ev;		// VETO energy
 	float ee;		// Positron energy
+	float en;		// "neutron" energy
 	float t;		// precise time
 	float x;		// x, y, z of the vertex
 	float y;
 	float z;
+	float rn;		// "neutron" radius
 	struct hit_struct hit[0];
 };
 
@@ -82,6 +90,12 @@ union hist_union {
 		TH1D *hV;
 		TH1D *hR;
 		TH1D *hE;
+		TH1D *hNG;
+		TH1D *hNC;
+		TH1D *hEMaxN[10];
+		TH1D *hEE;
+		TH1D *hNE;
+		TH1D *hNR;
 	} h;
 } Hist;
 
@@ -151,20 +165,35 @@ void BookHist(void)
 	Hist.h.mYZ[3] = new TH2D("mYZ3", "YZ - center distribution, selected the third event", 25, 0, 100, 25, 0, 100);
 	Hist.h.mYZ[4] = new TH2D("mYZ4", "YZ - center distribution, selected the fourth event", 25, 0, 100, 25, 0, 100);
 
+	
+
 	Hist.h.hM = new TH1D("hM", "Number of events in time window (50 us)", 20, 0, 20);
 	Hist.h.hV = new TH1D("hV", "Veto energy", 100, 0, 10);
-	Hist.h.hR = new TH1D("hR", "Distance between 1st and 2nd events;cm", 25, 0, 100);
-	Hist.h.hE = new TH1D("hE", "\"Positron\" energy", 25, 0, 10);
+	Hist.h.hR = new TH1D("hR", "Distance between 1st and 2nd events;cm", 34, 0, 170);
+	Hist.h.hE = new TH1D("hE", "\"Positron\" energy", 40, 0, 10);
+	Hist.h.hEE = new TH1D("hEE", "\"Positron\" energy for selected events", 40, 0, 10);
+	Hist.h.hNE = new TH1D("hNE", "\"Neutron\" energy for selected events", 40, 0, 10);
+	Hist.h.hNR = new TH1D("hNR", "\"Neutron radius\"  for selected events", 25, 0, 100);
+	Hist.h.hNC = new TH1D("hNC", "Number of strips in \"Positron\" cluster", 10, 0, 10);
+	Hist.h.hNG = new TH1D("hNG", "Number of \"gammas\"", 10, 0, 10);
+	
+
+	for(i=0; i<sizeof(Hist.h.hEMaxN) / sizeof(Hist.h.hEMaxN[0]); i++) {
+		sprintf(strs, "hEMaxN%d", i);
+		sprintf(strl, "Energy distribution of %d-th hit from \"neutron\"", i+1);
+		Hist.h.hEMaxN[i] = new TH1D(strs, strl, 120, 0, 6);
+	}
 }
 
 void CalculateEventParameters(struct event_struct *Evt)
 {
-	int i;
-	float sex, sey;	
+	int i, k;
+	int sex, sey;
+	float r2;
 
-	Evt->es = Evt->ep = Evt->ev = 0;
-	Evt->ns = 0;
-	Evt->x = Evt->y = Evt->z = 0;
+	Evt->es = Evt->ep = Evt->ev = Evt->en = 0;
+	Evt->ns = Evt->np = Evt->nv = 0;
+	Evt->x = Evt->y = Evt->z = Evt->rn = 0;
 	sex = sey = 0;
 	for (i=0; i<Evt->nhits; i++) {
 		switch(Evt->hit[i].type) {
@@ -172,13 +201,13 @@ void CalculateEventParameters(struct event_struct *Evt)
 			Evt->es += Evt->hit[i].amp;
 			Evt->ns++;
 			if (Evt->hit[i].proj) {
-				Evt->x += Evt->hit[i].xy * SWIDTH * Evt->hit[i].amp;
-				sex += Evt->hit[i].amp;
+				Evt->x += Evt->hit[i].xy * SWIDTH;
+				sex++;
 			} else {
-				Evt->y += Evt->hit[i].xy * SWIDTH * Evt->hit[i].amp;
-				sey += Evt->hit[i].amp;
+				Evt->y += Evt->hit[i].xy * SWIDTH;
+				sey++;
 			}
-			Evt->z += Evt->hit[i].z * SHEIGHT * Evt->hit[i].amp;
+			Evt->z += Evt->hit[i].z * SHEIGHT;
 			break;
 		case TYPE_PMT:
 			Evt->ep += Evt->hit[i].amp;
@@ -190,22 +219,36 @@ void CalculateEventParameters(struct event_struct *Evt)
 			break;
 		}
 	}
-	if (sex > 0) Evt->x /= sex;
-	if (sey > 0) Evt->y /= sey;
-	if (sex + sey > 0) Evt->z /= sex + sey;
+	if (sex > 0) Evt->x /= sex; else Evt->x = -1;
+	if (sey > 0) Evt->y /= sey; else Evt->y = -1;
+	if (sex + sey > 0) Evt->z /= sex + sey; else Evt->z = -1;
+
+	k = 0;
+	for (i=0; i<Evt->nhits; i++) if(Evt->hit[i].type == TYPE_SIPM) {
+		r2 = Evt->hit[i].xy * SWIDTH - ((Evt->hit[i].proj) ? Evt->x : Evt->y);
+		r2 *= r2;
+		r2 += (Evt->hit[i].z * SHEIGHT - Evt->z) * (Evt->hit[i].z * SHEIGHT - Evt->z);
+		Evt->rn += r2;
+		k++;
+		if (r2 < NEUTRONR * NEUTRONR) Evt->en += Evt->hit[i].amp;
+	}
+	if (k) Evt->rn /= k;
+	Evt->rn = sqrt(Evt->rn);
 }
 
-void FillR(struct event_struct *Evt, struct event_struct *EvtOld)
+void FillEMaxN(struct event_struct *Evt)
 {
-	float R;
+	int i, j;
+	double A0, A1;
 	
-	R = 0;
-	if (Evt->x <= 0 || EvtOld->x <= 0 || Evt->y <= 0 || EvtOld->y <= 0 || Evt->z <= 0 || EvtOld->z <= 0) return;
-	R += (Evt->x - EvtOld->x) * (Evt->x - EvtOld->x);	
-	R += (Evt->y - EvtOld->y) * (Evt->y - EvtOld->y);
-	R += (Evt->z - EvtOld->z) * (Evt->z - EvtOld->z);
-	R = sqrt(R);
-	Hist.h.hR->Fill(R);
+	A0 = 10000;
+	for (j=0; j<sizeof(Hist.h.hEMaxN) / sizeof(Hist.h.hEMaxN[0]); j++) {
+		A1 = 0;
+		for (i=0; i<Evt->nhits; i++) if (Evt->hit[i].type == TYPE_SIPM && Evt->hit[i].amp > A1 && Evt->hit[i].amp < A0) A1 = Evt->hit[i].amp;
+		if (A1 == 0) break;
+		Hist.h.hEMaxN[j]->Fill(A1);
+		A0 = A1;
+	}
 }
 
 void FillN(struct pre_event_struct *event, float event_time, int num)
@@ -222,6 +265,19 @@ void FillN(struct pre_event_struct *event, float event_time, int num)
 		delta = hit->time - chan->dt - event_time;
 		Hist.h.hDtn[num][hit->mod - 1]->Fill(delta);
 	}
+}
+
+void FillR(struct event_struct *Evt, struct event_struct *EvtOld)
+{
+	float R;
+	
+	R = 0;
+	if (Evt->x < 0 || EvtOld->x < 0 || Evt->y < 0 || EvtOld->y < 0 || Evt->z < 0 || EvtOld->z < 0) return;
+	R += (Evt->x - EvtOld->x) * (Evt->x - EvtOld->x);	
+	R += (Evt->y - EvtOld->y) * (Evt->y - EvtOld->y);
+	R += (Evt->z - EvtOld->z) * (Evt->z - EvtOld->z);
+	R = sqrt(R);
+	Hist.h.hR->Fill(R);
 }
 
 void FillXYZ(struct event_struct *Evt, int num)
@@ -253,17 +309,45 @@ void FilterAndCopy(struct event_struct *Evt, struct pre_event_struct *event)
 		chan = &Map[hit->mod-1][hit->chan];
 		delta = hit->time - chan->dt - Evt->t;
 		Hist.h.hDt[hit->mod - 1]->Fill(delta);
+		if (chan->type == TYPE_SIPM && hit->amp < SIPMAMIN) continue;
 		if (hit->amp > 30) Hist.h.hDtc[hit->mod - 1]->Fill(delta);
 		if (hit->amp > 30 && hit->amp < 60) Hist.h.hDtr[hit->mod - 1]->Fill(delta);
 		if (fabs(delta) > TCUT) continue;
 		Evt->hit[Evt->nhits].time = hit->time - chan->dt;
 		Evt->hit[Evt->nhits].amp  = hit->amp * chan->ecoef;
+		if (chan->type == TYPE_SIPM) Evt->hit[Evt->nhits].amp *= ECORR;
 		Evt->hit[Evt->nhits].type = chan->type;
 		Evt->hit[Evt->nhits].proj = chan->proj;
 		Evt->hit[Evt->nhits].xy   = chan->xy;
 		Evt->hit[Evt->nhits].z    = chan->z;
 		Evt->nhits++;
 	}
+}
+
+int FinalSelection(struct event_struct *Evt, struct event_struct *EvtOld)
+{
+	float R;
+	int n;
+//	Time cut 5 us
+	if ((Evt->gtime - EvtOld->gtime) / FREQ < 5) return 0;
+//	Radius cut 45 cm 3-dim and 37 cm for 2-dim
+ 	if (Evt->x < 0 || Evt->y < 0 || Evt->z < 0) return 0;	// neutron should have coordinates
+	R = (Evt->z - EvtOld->z) * (Evt->z - EvtOld->z);
+	n = 1;
+	if (EvtOld->x >= 0) {
+		R += (Evt->x - EvtOld->x) * (Evt->x - EvtOld->x);
+		n++;
+	}
+	if (EvtOld->y >= 0) {
+		R += (Evt->y - EvtOld->y) * (Evt->y - EvtOld->y);
+		n++;
+	}
+	R = sqrt(R);
+	if (n == 2 && R > 37) return 0;
+	if (n == 3 && R > 45) return 0;
+//		Strips in neutron event >= 4
+	if (Evt->ns < 4) return 0;
+	return 1;
 }
 
 float FindEventTime(struct pre_event_struct *event)
@@ -369,6 +453,7 @@ void TryAsPositron(struct event_struct *Evt)
 	float A;
 	float sex, sey, ex, ey, ez;	
 
+	Evt->nc = Evt->ng = 0;
 //	Find MAX SiPM
 	A = 0;
 	j = -1;
@@ -380,22 +465,26 @@ void TryAsPositron(struct event_struct *Evt)
 	
 	sex = sey = 0;
 	ex = ey = ez =0;
-	for (i=0; i<Evt->nhits; i++) if (Evt->hit[i].type == TYPE_SIPM && 
-		((Evt->hit[i].proj == Evt->hit[j].proj && Evt->hit[i].z == Evt->hit[j].z && abs(Evt->hit[i].xy - Evt->hit[j].xy) <= 1) ||
-		 (Evt->hit[i].proj != Evt->hit[j].proj && abs(Evt->hit[i].z - Evt->hit[j].z) <= 1))) {
-		Evt->ee += Evt->hit[i].amp;
-		if (Evt->hit[i].proj) {
-			ex += Evt->hit[i].amp * Evt->hit[i].xy * SWIDTH;
-			sex += Evt->hit[i].amp * SWIDTH;
+	for (i=0; i<Evt->nhits; i++) if (Evt->hit[i].type == TYPE_SIPM) {
+		if ((Evt->hit[i].proj == Evt->hit[j].proj && Evt->hit[i].z == Evt->hit[j].z && abs(Evt->hit[i].xy - Evt->hit[j].xy) <= 1) ||
+			(Evt->hit[i].proj != Evt->hit[j].proj && abs(Evt->hit[i].z - Evt->hit[j].z) <= 1)) {
+			if (Evt->hit[i].proj) {
+				ex += Evt->hit[i].amp * Evt->hit[i].xy * SWIDTH;
+				sex += Evt->hit[i].amp;
+			} else {
+				ey += Evt->hit[i].amp * Evt->hit[i].xy * SWIDTH;
+				sey += Evt->hit[i].amp;
+			}
+			ez += Evt->hit[i].amp * Evt->hit[i].z * SHEIGHT;
+			Evt->nc++;
 		} else {
-			ey += Evt->hit[i].amp * Evt->hit[i].xy * SWIDTH;
-			sey += Evt->hit[i].amp * SWIDTH;
+			if (Evt->hit[i].amp > E1GAMMA) Evt->ng++;
 		}
-		ez += Evt->hit[i].amp * Evt->hit[i].z * SHEIGHT;
 	}
-	Evt->x = (sex > 0) ? ex / sex : 0;
-	Evt->y = (sey > 0) ? ey / sey : 0;
-	Evt->z = (sex + sey > 0) ? ez / (sex + sey) : 0;	
+	Evt->ee = sex + sey;
+	Evt->x = (sex > 0) ? ex / sex : -1;
+	Evt->y = (sey > 0) ? ey / sey : -1;
+	Evt->z = (Evt->ee > 0) ? ez / Evt->ee : -1;
 }
 
 int main(int argc, char**argv)
@@ -405,13 +494,14 @@ int main(int argc, char**argv)
 	struct pre_event_struct *event;
 	struct event_struct *Evt;
 	struct event_struct *EvtOld;
+	int GEvtCnt;
 	int i, j, irc;
 	long long tbegin, tsum;
 	int EvWin;
 	time_t systime;
 	int Cnt[20];
 	const char *CntName[20] = {"Events read", "Time defined", "In diff time cut", "In energy cuts", "Global events", "Global events+2", "Global events+3", 
-		"Veto", "", "", "", "", "", "", "", "", "", "", "", ""};
+		"Veto", "Full selection", "", "", "", "", "", "", "", "", "", "", ""};
 
 	Evt = NULL;
 	event = NULL;
@@ -443,11 +533,11 @@ int main(int argc, char**argv)
 		printf("Allocation failure: %m\n");
 		goto fin;
 	}
-	BookHist();
-	
 //		Book histogramms and trees
+	BookHist();
 		
 	for (j=1; j<argc; j++) {
+		GEvtCnt = 0;
 		fIn = fopen(argv[j], "rb");
 		if (!fIn) {
 			printf("Can not open input file %s: %m\n", argv[j]);
@@ -486,7 +576,7 @@ int main(int argc, char**argv)
 			FillXYZ(Evt, 0);
 			Hist.h.hV->Fill(Evt->ev);
 			Hist.h.mXZ[0]->Fill(Evt->x, Evt->z);
-			Hist.h.mYZ[0]->Fill(Evt->y, Evt->z);
+			Hist.h.mYZ[0]->Fill(99-Evt->y, Evt->z);
 			if (Evt->ev >= VETOEMIN || Evt->nv >= VETONMIN) {
 				Cnt[7]++;
 				continue;
@@ -501,17 +591,27 @@ int main(int argc, char**argv)
 						Hist.h.hEN[1]->Fill(EvtOld->ns, EvtOld->es);
 						Hist.h.hESEP[1]->Fill(EvtOld->es, EvtOld->ep);
 						Hist.h.mXZ[1]->Fill(EvtOld->x, EvtOld->z);
-						Hist.h.mYZ[1]->Fill(EvtOld->y, EvtOld->z);
+						Hist.h.mYZ[1]->Fill(99-EvtOld->y, EvtOld->z);
 						FillXYZ(EvtOld, 1);
 						Hist.h.hEN[2]->Fill(Evt->ns, Evt->es);
 						Hist.h.hESEP[2]->Fill(Evt->es, Evt->ep);
 						FillXYZ(Evt, 2);
 						Hist.h.mXZ[2]->Fill(Evt->x, Evt->z);
-						Hist.h.mYZ[2]->Fill(Evt->y, Evt->z);
+						Hist.h.mYZ[2]->Fill(99-Evt->y, Evt->z);
 						FillN(event, Evt->t, 0);
 						FillR(Evt, EvtOld);
 						Hist.h.hE->Fill(EvtOld->ee);
+						Hist.h.hNG->Fill(EvtOld->ng);
+						Hist.h.hNC->Fill(EvtOld->nc);
+						FillEMaxN(Evt);
 						Cnt[4]++;
+						GEvtCnt++;
+						if (FinalSelection(Evt, EvtOld)) {
+							Hist.h.hEE->Fill(EvtOld->ee);
+							Hist.h.hNE->Fill(Evt->en);
+							Hist.h.hNR->Fill(Evt->rn);
+							Cnt[8]++;
+						}
 						break;
 					case 1:
 						Hist.h.hT[2]->Fill((Evt->gtime - EvtOld->gtime) / FREQ);
@@ -519,7 +619,7 @@ int main(int argc, char**argv)
 						Hist.h.hESEP[3]->Fill(Evt->es, Evt->ep);
 						FillXYZ(Evt, 3);
 						Hist.h.mXZ[3]->Fill(Evt->x, Evt->z);
-						Hist.h.mYZ[3]->Fill(Evt->y, Evt->z);
+						Hist.h.mYZ[3]->Fill(99-Evt->y, Evt->z);
 						FillN(event, Evt->t, 1);
 						Cnt[5]++;
 						break;
@@ -529,7 +629,7 @@ int main(int argc, char**argv)
 						Hist.h.hESEP[4]->Fill(Evt->es, Evt->ep);
 						FillXYZ(Evt, 4);
 						Hist.h.mXZ[4]->Fill(Evt->x, Evt->z);
-						Hist.h.mYZ[4]->Fill(Evt->y, Evt->z);
+						Hist.h.mYZ[4]->Fill(99-Evt->y, Evt->z);
 						FillN(event, Evt->t, 2);
 						Cnt[6]++;
 						break;
@@ -543,7 +643,7 @@ int main(int argc, char**argv)
 				EvWin = 0;
 			}
 		}
-		printf("End: %s", ctime(&systime));
+		printf("%d events. End: %s", GEvtCnt, ctime(&systime));
 		tsum += event->gtime - tbegin;
 		fclose(fIn);
 	}

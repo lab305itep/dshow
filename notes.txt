@@ -3,8 +3,64 @@ OFF:     705 (begin 01.03 22:14)  791 (end 03.03 3:44)      92032 s
 ON 60%:  832 (begin 03.03 19:54)  1239 (end 10.03 18:01)   553822 s
 ON 100%: 1282 (begin 12.03 1:54)  1396 (end 14.03 21:03)   224518 s
 Cm:      1403 (begin 24.03 16:18) 1405 (end 24.03 17:39)     4830 s
-
+Cm ref:  1303 (begin 12.03 10:15) 1305 (end 12.03 11:27)     4289 s ratio = 1.126
 
 700-799:  110776 s;  900-1399: 740297 s; ratio = 6.683
 
+900-1399 bad files: 910, 980, 981, 1050-1052, 1143-1173, 1245-1247, 1311, 1312, 1387, 1399.
+705-791: bad files: 738, 739, 742, 745, 746, 753-766, 773.
+705-791 clean time:   89608 s; 900-1399 clean time: 606717 s; ratio = 6.771
 
+files 1245-1247: looks like Cm source present.
+
+Source insertion lines:
+2 - along X in the center of Y1Z1 PMT block, full length 3985 mm, short outer tube.
+3 - along Y in the center of X3Z3 PMT block, full length 5987 mm, long outer tube.
+
+Sources:
+137Cs - no mark, 265 Bk
+22Na  - red mark
+60Co  - white mark, 150 Bk
+248Cm - black mark, 20 Bk
+
+60Co
+20 cm - run 2101
+10 cm - runs 2102, 2103
+30 cm - runs 2104, 2105
+50 cm - runs 2106, 2107
+70 cm - runs 2108, 2109, 2110
+
+248Cm
+05cm  - runs 2111, 2112
+25cm  - runs 2113, 2114
+45cm  - runs 2115, 2116, 2117
+65cm  - runs 2149, 2150
+85cm  - runs 2151, 2152
+
+LED
+f=10Hz  A=200  - run 2153
+f=200Hz A=200  - run 2154
+f=200Hz A=400  - run 2155
+f=200Hz A=800  - run 2156
+f=200Hz A=1200 - runs 2157, 2158
+f=200Hz A=600  - run 2159
+
+22Na
+05cm - runs 2193, 2194
+25cm - runs 2195, 2196
+45cm - runs 2197, 2198
+65cm - runs 2199, 2200, 2201
+85cm - runs 2202, 2203
+
+Runs calibrated:
+--- Old settings
+000700-741		reactor OFF
+000743-830		reactor OFF then ON 30%
+000831-1140		ON 60%
+001241-1310		ON 60-100%
+001333-1394		ON 100%
+001770-1860		ON 100%
+001861-1940		ON 100%
+--- New settings
+002066-2085		ON 100%
+002086-2148		ON 100%, Cm, Co

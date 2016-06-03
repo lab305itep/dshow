@@ -5,6 +5,8 @@
 
 #define SIPIX	14.0
 #define MIP	2000.0
+#define PMTSHIFT	-78.1
+#define VETOSHIFT	-94.9
 
 float SiCalib[70][64];
 
@@ -28,12 +30,12 @@ void SiPM(int mod, int con, int proj, int xy, int z, float dt, float ecoef)
 //	mod=1...70; chan=1...64; proj=0/1; xy=1...5; z=1...5
 void PMT(int mod, int chan, int proj, int xy, int z, float dt, float ecoef)
 {
-	printf("C\t%2d\t%2d\t1\t%d\t%2d\t%d\t%f\t%f\n", mod, chan - 1, proj, xy - 1, z - 1, dt, ecoef);	
+	printf("C\t%2d\t%2d\t1\t%d\t%2d\t%d\t%f\t%f\n", mod, chan - 1, proj, xy - 1, z - 1, dt + PMTSHIFT, ecoef);	
 }
 
 void VETO(int mod, int chan, float dt, float ecoef)
 {
-	printf("C\t%2d\t%2d\t2\t0\t0\t0\t%f\t%f\n", mod, chan - 1, dt, ecoef);	
+	printf("C\t%2d\t%2d\t2\t0\t0\t0\t%f\t%f\n", mod, chan - 1, dt + VETOSHIFT, ecoef);	
 }
 
 double GetKey(const char *str, const char *key)
@@ -143,7 +145,7 @@ int main(int argc, char **argv)
 	VETO(3,    4, 47.3,  4.0);
 	VETO(3,    5, 80.2,  4.0);
 	VETO(3,    6, 42.7,  4.0);
-	VETO(3,    7, 111.9,  4.0);
+	VETO(3,    7, 81.9,  4.0);
 	VETO(3,    8, 44.0,  4.0);
 
 	VETO(3,   17, 44.4,  4.0);

@@ -74,28 +74,32 @@ void cm_e2s(void)
 	
 	TH2D *ha = fa.Get("hESEP2");
 	TH2D *hc = fc.Get("hESEP2");
-	TH1D *hta = ha->ProjectionX("__NOCM");
-	TH1D *htc = hc->ProjectionX("__CM");
-	
+	TH1D *hta = ha->ProjectionX("NO CM");
+	TH1D *htc = hc->ProjectionX("Neutron capture energy;SiPM, MeV");
+
 	htc->SetTitle("Neutron capture energy;SiPM, MeV");
 	
 	hta->SetLineColor(kRed);
 	htc->SetLineColor(kBlue);
-	htc->SetMarkerStyle(21);
+	hta->Sumw2();
+	htc->Sumw2();
+	hta->Scale(1.126);
+
+	TH1D *htdiff;
+	htc->Copy(htdiff);
+	htdiff->SetLineColor(kGreen);
+	htdiff->SetMarkerStyle(21);
+	htdiff->Add(hta, -1);
 
 	htc->DrawCopy();
 	hta->DrawCopy("same");
-
-	hta->Sumw2();
-	htc->Sumw2();
-	htc->Add(hta, -1.2);
-	htc->DrawCopy("same");
+	htdiff->DrawCopy("same");
 
 	TLegend	*lg = new TLegend(0.7, 0.8, 0.95, 0.9);
 	lg->SetFillColor(kWhite);
 	lg->AddEntry(htc, "Cm", "l");
 	lg->AddEntry(hta, "No Cm", "l");
-	lg->AddEntry(htc, "Background subtracted", "p");
+	lg->AddEntry(htdiff, "Background subtracted", "lp");
 	lg->Draw();
 
 	gPad->Update();

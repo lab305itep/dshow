@@ -6,7 +6,7 @@ void nu_t(void)
 	gROOT->SetStyle("Plain");
 	gStyle->SetOptStat(0);
 	
-	TFile f7("danss_data_000700.root");
+	TFile f7("danss_data_000705.root");
 	TFile f9("danss_data_000900.root");
 	
 	TH1D *h7t = f7.Get("hT1");
@@ -16,7 +16,7 @@ void nu_t(void)
 	h7t->Sumw2();
 	h9t->Sumw2();
 	
-	h7t->Scale(6.683);
+	h7t->Scale(6.771);
 	
 	h7t->SetLineColor(kRed);
 	h9t->SetLineColor(kBlue);
@@ -54,7 +54,7 @@ void nu_e2s(void)
 	gROOT->SetStyle("Plain");
 	gStyle->SetOptStat(0);
 	
-	TFile f7("danss_data_000700.root");
+	TFile f7("danss_data_000705.root");
 	TFile f9("danss_data_000900.root");
 	
 	TH2D *h7e = f7.Get("hESEP2");
@@ -68,7 +68,7 @@ void nu_e2s(void)
 	h7es->Sumw2();
 	h9es->Sumw2();
 	
-	h7es->Scale(6.683);
+	h7es->Scale(6.771);
 	
 	h7es->SetLineColor(kRed);
 	h9es->SetLineColor(kBlue);
@@ -106,7 +106,7 @@ void nu_diff2X(char *hname, char *title)
 	gROOT->SetStyle("Plain");
 	gStyle->SetOptStat(0);
 	
-	TFile f7("danss_data_000700.root");
+	TFile f7("danss_data_000705.root");
 	TFile f9("danss_data_000900.root");
 	
 	TH2D *h7e = f7.Get(hname);
@@ -130,7 +130,7 @@ void nu_diff2X(char *hname, char *title)
 	h7es->Sumw2();
 	h9es->Sumw2();
 	
-	h7es->Scale(6.683);
+	h7es->Scale(6.771);
 	
 	h7es->SetLineColor(kRed);
 	h9es->SetLineColor(kBlue);
@@ -169,7 +169,7 @@ void nu_diff2Y(char *hname, char *title)
 	gROOT->SetStyle("Plain");
 	gStyle->SetOptStat(0);
 	
-	TFile f7("danss_data_000700.root");
+	TFile f7("danss_data_000705.root");
 	TFile f9("danss_data_000900.root");
 	
 	TH2D *h7e = f7.Get(hname);
@@ -193,7 +193,7 @@ void nu_diff2Y(char *hname, char *title)
 	h7es->Sumw2();
 	h9es->Sumw2();
 	
-	h7es->Scale(6.683);
+	h7es->Scale(6.771);
 	
 	h7es->SetLineColor(kRed);
 	h9es->SetLineColor(kBlue);
@@ -232,7 +232,7 @@ void nu_diff(char *hname, char *title)
 	gROOT->SetStyle("Plain");
 	gStyle->SetOptStat(0);
 	
-	TFile f7("danss_data_000700.root");
+	TFile f7("danss_data_000705.root");
 	TFile f9("danss_data_000900.root");
 	
 	TH1D *h7es = f7.Get(hname);
@@ -248,7 +248,7 @@ void nu_diff(char *hname, char *title)
 	h7es->Sumw2();
 	h9es->Sumw2();
 	
-	h7es->Scale(6.683);
+	h7es->Scale(6.771);
 	
 	h7es->SetLineColor(kRed);
 	h9es->SetLineColor(kBlue);
