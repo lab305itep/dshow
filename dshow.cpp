@@ -788,7 +788,7 @@ void dshowMainFrame::DoDraw(void)
 	TThread::UnLock();
 }
 
-/*	Draw a singlwe event					*/
+/*	Draw a single event					*/
 void dshowMainFrame::DrawEvent(TCanvas *cv)
 {
 	TBox PmtBox;
@@ -1036,7 +1036,7 @@ void dshowMainFrame::ProcessEvent(char *data)
 	int evt_len;
 	void *ptr;
 	int sumPMT, sumSiPM, sumSiPMc;
-	int nSiPM, nSiPMc, nPMT, nVeto;
+	int nSiPM, nSiPMc, nPMT;
 	long long gTime;
 	int gTrig;
 	int nHits;
@@ -1049,7 +1049,6 @@ void dshowMainFrame::ProcessEvent(char *data)
 	sumSiPMc = 0;
 	nSiPMc = 0;
 	nPMT = 0;
-	nVeto = 0;
 	gTime = -1;
 	nHits = 0;
 	cHits = 0;
@@ -1186,9 +1185,6 @@ void dshowMainFrame::ProcessEvent(char *data)
 			sumPMT += CleanEvent[i].amp;
 			nPMT++;
 			break;
-		case TYPE_VETO:
-			nVeto++;
-			break;
 		}
 	}
 //	TH1D *hSiPMsum[2];	// SiPM summa, all/no veto
@@ -1201,7 +1197,7 @@ void dshowMainFrame::ProcessEvent(char *data)
 	CommonData->hPMThits[0]->Fill(1.0*nPMT);
 //	TH1D *hSPRatio[2];	// SiPM sum to PTMT sum ratio, all/no veto
 	if (sumPMT > 0) CommonData->hSPRatio[0]->Fill(sumSiPMc * PMT2MEV / (sumPMT * SIPM2MEV));
-	if (!nVeto) {
+	if (EventTag != TAG_VETO) {
 //	TH1D *hSiPMsum[2];	// SiPM summa, all/no veto
 		CommonData->hSiPMsum[1]->Fill(sumSiPMc / SIPM2MEV);
 //	TH1D *hSiPMhits[2];	// SiPM Hits, all/no veto
@@ -1263,10 +1259,13 @@ void dshowMainFrame::ProcessEvent(char *data)
 void dshowMainFrame::CalculateTags(int cHits, long long gtime)
 {
 	float xsum, exsum, ysum, eysum, zsum;
+	int nx, ny;
 	int ncHits;
 	float eall, eclust, r2, xy0;
 	float E;
 	int i, j;
+	int nVeto;
+	float sumVeto;
 
 	eall = 0;
 	for (i=0; i<cHits; i++) if (CleanEvent[i].type == TYPE_SIPM) eall += CleanEvent[i].amp;
@@ -1276,7 +1275,14 @@ void dshowMainFrame::CalculateTags(int cHits, long long gtime)
 	EventEnergy = eall;
 
 //	VETO
+	nVeto = 0;
+	sumVeto  = 0;
 	for (i=0; i<cHits; i++) if (CleanEvent[i].type == TYPE_VETO) {
+		sumVeto += CleanEvent[i].amp;
+		nVeto++;
+	}
+	
+	if (nVeto > 1 || sumVeto > VETOMIN) {
 		EventTag = TAG_VETO;
 		Recent[0].gTime = gtime;
 		Recent[0].Energy = eall;
@@ -1286,37 +1292,34 @@ void dshowMainFrame::CalculateTags(int cHits, long long gtime)
 	}
 //	Check for neutron
 //		Calculate parameters
-//		Energy center
-	xsum = 0;
-	exsum = 0;
-	ysum = 0;
-	eysum = 0;
-	zsum = 0;
+//		"Gamma" center
+	xsum = ysum = zsum = 0;
+	nx = ny = 0;
 	
-	for (i=0; i<cHits; i++) if (CleanEvent[i].type == TYPE_SIPM && CleanEvent[i].amp > Pars.nHitMin * SIPM2MEV) {
+	for (i=0; i<cHits; i++) if (CleanEvent[i].type == TYPE_SIPM) {
 		if (CleanEvent[i].z & 1) {	// X
-			exsum += CleanEvent[i].amp;
-			xsum += CleanEvent[i].amp * CleanEvent[i].xy;
+			nx++;
+			xsum += CleanEvent[i].xy;
 		} else {			// Y
-			eysum += CleanEvent[i].amp;
-			ysum += CleanEvent[i].amp * CleanEvent[i].xy;
+			ny++;
+			ysum += CleanEvent[i].xy;
 		}
-		zsum += CleanEvent[i].amp * CleanEvent[i].z;
+		zsum += CleanEvent[i].z;
 	}
-	if (exsum > 0) {
-		xsum /= exsum;
+	if (nx) {
+		xsum /= nx;
 	} else {
 		xsum = -1;
 		CommonData->hCuts->Fill(CUT_NONX);
 	}
-	if (eysum > 0) {
-		ysum /= eysum;
+	if (ny) {
+		ysum /= ny;
 	} else {
 		ysum = -1;
 		CommonData->hCuts->Fill(CUT_NONY);
 	}
-	if (exsum + eysum > 0) {
-		zsum /= exsum + eysum;
+	if (nx + ny) {
+		zsum /= nx + ny;
 	} else {
 		zsum = -1;
 		CommonData->hCuts->Fill(CUT_NONZ);
@@ -1331,11 +1334,11 @@ void dshowMainFrame::CalculateTags(int cHits, long long gtime)
 			if (r2 > Pars.rMax * Pars.rMax) continue;
 		}
 		eclust += CleanEvent[i].amp;
-		if (CleanEvent[i].amp > Pars.nHitMin * SIPM2MEV) ncHits++;
+		ncHits++;
 	}
 	eclust /= SIPM2MEV;
 //		Implement criteria
-	if (ncHits >= Pars.nMin && eclust > Pars.eNMin && eclust < Pars.eNMax && eclust / eall > Pars.eNFraction) {
+	if (ncHits >= Pars.nMin && eclust > Pars.eNMin && eclust < Pars.eNMax && eall - eclust < Pars.eNFraction) {
 		EventTag = TAG_NEUTRON;
 		EventEnergy = eclust;
 		Recent[2].Energy = eclust;
@@ -1351,7 +1354,7 @@ void dshowMainFrame::CalculateTags(int cHits, long long gtime)
 	}
 	if (ncHits < Pars.nMin) CommonData->hCuts->Fill(CUT_NMULT);
 	if (eclust <= Pars.eNMin || eclust >= Pars.eNMax) CommonData->hCuts->Fill(CUT_NENERGY);
-	if (eclust / eall <= Pars.eNFraction) CommonData->hCuts->Fill(CUT_NFRACTION);
+	if (eall - eclust >= Pars.eNFraction) CommonData->hCuts->Fill(CUT_NFRACTION);
 	
 //		Check for pisitron
 //		Find consequtive cluster near EMAX strip

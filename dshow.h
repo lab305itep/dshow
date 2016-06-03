@@ -7,10 +7,11 @@
 #define DEFCONFIG	"general.conf"
 #define MAXADC	4096
 #define MAXRGB	128
-//	12 per pixel * 1.5 crosstalk 15 p.e./MeV ~ 250
-#define SIPM2MEV 250.0	
-//	20 MeV ~ 2000 channels
-#define PMT2MEV 100.0
+//	11 per pixel * 1.4 crosstalk 15 p.e./MeV ~ 250
+#define SIPM2MEV 230.0	
+//	20 MeV ~ 2100 channels
+#define PMT2MEV 105.0
+#define VETOMIN	500
 #define RATELEN	1000
 //	A second in GTIME units 
 #define ONESECOND 125000000
