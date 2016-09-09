@@ -72,9 +72,8 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h, const char
 	EventLength = 0;
 	CleanEvent = NULL;
 	CleanLength = 0;
-	Recent[0].gTime = -ONESECOND;
-	Recent[1].gTime = -ONESECOND;
-	Recent[2].gTime = -ONESECOND;
+	EventStuckPos = 0;
+	memset(EventStuck, 0, sizeof(EventStuck));
 
 	gROOT->SetStyle("Plain");
 	gStyle->SetOptStat("e");
@@ -85,7 +84,7 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h, const char
 		CommonData->hAmpS[i] = new TH2D(strs, strl, 64, 0, 64, 128, 0, 128);
 		snprintf(strs, sizeof(strs), "hAmpE%2.2d", i+1);
 		snprintf(strl, sizeof(strl), "Module %2.2d: amplitude versus channels number (event)", i+1);
-		CommonData->hAmpE[i] = new TH2D(strs, strl, 64, 0, 64, 248, 128, 4096);
+		CommonData->hAmpE[i] = new TH2D(strs, strl, 64, 0, 64, 256, 0, 4096);
 		snprintf(strs, sizeof(strs), "hTimeA%2.2d", i+1);
 		snprintf(strl, sizeof(strl), "Module %2.2d: time versus channels number, all hits", i+1);
 		CommonData->hTimeA[i] = new TH2D(strs, strl, 64, 0, 64, 100, 0, 512);
@@ -267,7 +266,7 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h, const char
 	AddFrame(fStatusBar, new TGLayoutHints(kLHintsBottom | kLHintsExpandX, 0, 0, 2, 0));
 
    	// Sets window name and shows the main frame
-   	SetWindowName("DANSS Show");
+   	SetWindowName("DANSS Show. Version of " __TIMESTAMP__ ".");
    	MapSubwindows();
    	Resize(GetDefaultSize());
    	MapWindow();
@@ -322,7 +321,7 @@ void dshowMainFrame::CreateWaveTab(TGTab *tab)
 	lb = new TGLabel(hframe, "Threshold:");
    	hframe->AddFrame(lb, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));		
 	nWaveThreshold = new TGNumberEntry(hframe, 0, 5, -1, TGNumberFormat::kNESInteger, TGNumberFormat::kNEANonNegative);
-	nWaveThreshold->SetIntNumber(100);
+	nWaveThreshold->SetIntNumber(0);
    	hframe->AddFrame(nWaveThreshold, new TGLayoutHints(kLHintsLeft  | kLHintsCenterY, 5, 5, 3, 4));
  
     	me->AddFrame(hframe, new TGLayoutHints(kLHintsBottom | kLHintsExpandX, 2, 2, 2, 2));
@@ -833,7 +832,8 @@ void dshowMainFrame::DrawEvent(TCanvas *cv)
 		{-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0},
 		{-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0},
 	};
-	const char *tagname[] = {"NONE", "VETO", "POSITRON", "NEUTRON"};
+	const char *tagname[] = {"VETO ", "POSITRON ", "NEUTRON "};
+	char str[64];
 
 	if (!CommonData->EventHits) return;
 //		Draw DANSS	
@@ -887,7 +887,9 @@ void dshowMainFrame::DrawEvent(TCanvas *cv)
 
 	ax.DrawAxis(0.05, 0.05, 0.95, 0.05, 0.0, (double) MAXADC);
 //		Draw TAG
-	txt.DrawText(0.2, 0.95, tagname[CommonData->EventTag]);
+	str[0] = '\0';
+	for (i=0; i<sizeof(tagname) / sizeof(tagname[0]); i++) if (CommonData->EventFlags & (1 << i)) strcat(str, tagname[i]);
+	txt.DrawText(0.2, 0.95, str);
 
 	CommonData->EventHits = 0;
 }
@@ -1041,7 +1043,8 @@ void dshowMainFrame::ProcessEvent(char *data)
 	int gTrig;
 	int nHits;
 	int cHits;
-	float dtM, dtN, dr;
+	float dtM, dtN, dr, drZ;
+	int PMTmask[2][5][5];
 
 	sumPMT = 0;
 	sumSiPM = 0;
@@ -1054,7 +1057,7 @@ void dshowMainFrame::ProcessEvent(char *data)
 	cHits = 0;
 
 	head = (struct rec_header_struct *)data;
-	for (iptr = sizeof(struct rec_header_struct); iptr < head->len; iptr += len) {
+	for (iptr = sizeof(struct rec_header_struct); iptr < head->len; iptr += len) {		// record by record
 		rec = (struct hw_rec_struct *) &data[iptr];
 		len = (rec->len + 1) * sizeof(short);
 
@@ -1070,9 +1073,10 @@ void dshowMainFrame::ProcessEvent(char *data)
 		chan = rec->chan;
 		switch(rec->type) {
 		case TYPE_MASTER:
-			for (i = 0; i < rec->len - 2; i++) if (rec->d[i+1] & 0x4000) rec->d[i+1] |= 0x8000;
-			amp = FindMaxofShort(&rec->d[1], rec->len - 2);
-			t = NSPERCHAN * (FindHalfTime(&rec->d[1], rec->len - 2, amp) - rec->d[0] / 6.0);
+			for (i = 0; i < rec->len - 2; i++) if (rec->d[i+1] & 0x4000) rec->d[i+1] |= 0x8000;		// do waveform data sign extension
+			amp = FindMaxofShort(&rec->d[1], rec->len - 2);							// Amplitude
+			t = NSPERCHAN * (FindHalfTime(&rec->d[1], rec->len - 2, amp) - rec->d[0] / 6.0);		// Time
+//			Extract Waveform for drawing
 			if (!CommonData->hWaveForm && rWaveTrig->IsOn() && nWFD->GetIntNumber() == mod && nChan->GetIntNumber() == chan 
 				&& amp > nWaveThreshold->GetIntNumber()) {
 				sprintf(strl, "Event WaveForm for %d.%2.2d", mod, chan);
@@ -1081,9 +1085,11 @@ void dshowMainFrame::ProcessEvent(char *data)
 				for (i = 0; i < rec->len - 2; i++) CommonData->hWaveForm->SetBinContent(i + 1, (double) rec->d[i+1]);
 				CommonData->thisWaveFormCnt = CommonData->EventCnt;
 			}
+//			Fill histogramms
 			CommonData->hAmpE[mod-1]->Fill((double)chan, (double)amp);
 			CommonData->hTimeA[mod-1]->Fill((double)chan, t);
 			if (amp > CommonData->TimeBThreshold) CommonData->hTimeB[mod-1]->Fill((double)chan, t);
+//			Add hit to event structure
 			if (Map[mod-1][chan].type >= 0) {
 				if (nHits >= EventLength) {
 					ptr = realloc(Event, (EventLength + 1024) * sizeof(struct evt_disp_struct));
@@ -1103,6 +1109,7 @@ void dshowMainFrame::ProcessEvent(char *data)
 			break;
 		case TYPE_RAW:
 			amp = FindMaxofShort(&rec->d[1], rec->len - 2);
+//			Extract Waveform for drawing
 			if (!CommonData->hWaveForm && rWaveTrig->IsOn() && nWFD->GetIntNumber() == mod && nChan->GetIntNumber() == chan
 				&& amp > nWaveThreshold->GetIntNumber()) {
 				sprintf(strl, "Event WaveForm for %d.%2.2d", mod, chan);
@@ -1112,8 +1119,9 @@ void dshowMainFrame::ProcessEvent(char *data)
 			}
 			break;
 		case TYPE_SUM:
-			for (i = 0; i < rec->len - 2; i++) if (rec->d[i+1] & 0x4000) rec->d[i+1] |= 0x8000;
+			for (i = 0; i < rec->len - 2; i++) if (rec->d[i+1] & 0x4000) rec->d[i+1] |= 0x8000;		// do waveform data sign extension
 			amp = FindMaxofShort(&rec->d[1], rec->len - 2);
+//			Extract Waveform for drawing
 			if (!CommonData->hWaveForm && rWaveHist->IsOn() && nWFD->GetIntNumber() == mod && nChan->GetIntNumber() == chan
 				&& amp > nWaveThreshold->GetIntNumber()) {
 				sprintf(strl, "Event WaveForm for %d.%2.2d", mod, chan);
@@ -1158,6 +1166,9 @@ void dshowMainFrame::ProcessEvent(char *data)
 	} else {
 		CommonData->hCuts->Fill(CUT_NOSITIME);
 	}
+//		Create PMTmask
+	memset(PMTmask, 0, sizeof(PMTmask));
+	for (i=0; i<nHits; i++) if (Event[i].type == TYPE_PMT && Event[i].xy >= 0) PMTmask[Event[i].z & 1][Event[i].z/2][Event[i].xy] = 1;
 //		Clean the event
 	if (CleanLength < EventLength) {
 		ptr = realloc(CleanEvent, EventLength * sizeof(struct evt_disp_struct));
@@ -1166,11 +1177,14 @@ void dshowMainFrame::ProcessEvent(char *data)
 		CleanLength = EventLength;
 	}
 	for (i=0; i<nHits; i++) {
-		if (Event[i].type == TYPE_SIPM && ((!nat) || fabs(Event[i].time - at) > CommonData->SiPMWindow)) continue;
+		if (Event[i].xy < 0) continue;											// unknown position
+		if (Event[i].type == TYPE_SIPM && ((!nat) || fabs(Event[i].time - at) > CommonData->SiPMWindow)) continue;	// time window
+		if (Event[i].type == TYPE_SIPM && Event[i].amp < CommonData->TimeBThreshold && (!PMTmask[Event[i].z & 1][Event[i].z/20][Event[i].xy/5])) continue;	// support in PMT for small amplitudes
 		memcpy(&CleanEvent[cHits], &Event[i], sizeof(struct evt_disp_struct));
 		cHits++;
 	}
-	CalculateTags(cHits, gTime);
+	CalculateTags(cHits);
+	EventStuck[EventStuckPos].gTime = gTime;
 	for (i=0; i<cHits; i++) {
 		switch (CleanEvent[i].type) {
 		case TYPE_SIPM:
@@ -1197,7 +1211,7 @@ void dshowMainFrame::ProcessEvent(char *data)
 	CommonData->hPMThits[0]->Fill(1.0*nPMT);
 //	TH1D *hSPRatio[2];	// SiPM sum to PTMT sum ratio, all/no veto
 	if (sumPMT > 0) CommonData->hSPRatio[0]->Fill(sumSiPMc * PMT2MEV / (sumPMT * SIPM2MEV));
-	if (EventTag != TAG_VETO) {
+	if (!(EventFlags & FLAG_VETO)) {
 //	TH1D *hSiPMsum[2];	// SiPM summa, all/no veto
 		CommonData->hSiPMsum[1]->Fill(sumSiPMc / SIPM2MEV);
 //	TH1D *hSiPMhits[2];	// SiPM Hits, all/no veto
@@ -1211,8 +1225,8 @@ void dshowMainFrame::ProcessEvent(char *data)
 	}
 //		Copy event for drawing
 	if ((!CommonData->EventHits) && sumPMT >= nPMTSumThreshold->GetIntNumber() && sumSiPM >= nSiPMSumThreshold->GetIntNumber() && 
-		(rEvtAll->IsOn() || (rEvtNone->IsOn() && EventTag == TAG_NONE) || (rEvtVeto->IsOn() && EventTag == TAG_VETO) 
-		|| (rEvtPositron->IsOn() && EventTag == TAG_POSITRON) || (rEvtNeutron->IsOn() && EventTag == TAG_NEUTRON))) {
+		(rEvtAll->IsOn() || (rEvtNone->IsOn() && !EventFlags) || (rEvtVeto->IsOn() && (EventFlags & FLAG_VETO)) 
+		|| (rEvtPositron->IsOn() && (EventFlags & FLAG_POSITRON)) || (rEvtNeutron->IsOn() && (EventFlags & FLAG_NEUTRON)))) {
 		if (cHits > CommonData->EventLength) {
 			ptr = realloc(CommonData->Event, cHits * sizeof(struct evt_disp_struct));
 			if (ptr) {
@@ -1225,38 +1239,14 @@ void dshowMainFrame::ProcessEvent(char *data)
 			memcpy(CommonData->Event, CleanEvent, cHits * sizeof(struct evt_disp_struct));
 			CommonData->EventHits = cHits;
 		}
-		CommonData->EventTag = EventTag;
+		CommonData->EventFlags = EventFlags;
 		CommonData->EventEnergy = EventEnergy;
 		CommonData->thisEventCnt = CommonData->EventCnt;
-	}
-//		try to get time correlations
-	if (EventTag == TAG_NEUTRON) {
-		dtM = (Recent[1].gTime - Recent[0].gTime) * NSPERCHAN / 1000.0;	// to us
-		dtN = (Recent[2].gTime - Recent[1].gTime) * NSPERCHAN / 1000.0;	// to us
-		dr = 0;
-		for (i=0; i<3; i++) if (Recent[2].Vertex[i] >= 0 && Recent[1].Vertex[i] >= 0) dr += (Recent[2].Vertex[i] - Recent[1].Vertex[i]) * (Recent[2].Vertex[i] - Recent[1].Vertex[i]);
-		dr = sqrt(dr);
-		if (dtN < Pars.tNeutronCapture && dr < Pars.NeutronPath) {
-			if (dtM > Pars.tMesoDecay)  {	// Neutrino
-				CommonData->hNeutrinoEnergy[0]->Fill(Recent[1].Energy);
-				CommonData->hNeutrinoEnergy[1]->Fill(Recent[2].Energy);
-				CommonData->hCaptureTime->Fill(dtN);
-			} else if (dtM > 0 && dtM < Pars.tMesoDecay) {	// Mesoatom
-				CommonData->hMesoEnergy[0]->Fill(Recent[1].Energy);
-				CommonData->hMesoEnergy[1]->Fill(Recent[2].Energy);
-				CommonData->hMesoTime[0]->Fill(dtM);
-				CommonData->hMesoTime[1]->Fill(dtN);
-			}
-			CommonData->hNeutronPath->Fill(dr);
-			Recent[0].gTime = -ONESECOND;
-			Recent[1].gTime = -ONESECOND;
-			Recent[2].gTime = -ONESECOND;
-		}
 	}
 }
 
 /*	Check event for veto/positron/neutron signature		*/
-void dshowMainFrame::CalculateTags(int cHits, long long gtime)
+void dshowMainFrame::CalculateTags(int cHits)
 {
 	float xsum, exsum, ysum, eysum, zsum;
 	int nx, ny;
@@ -1266,12 +1256,13 @@ void dshowMainFrame::CalculateTags(int cHits, long long gtime)
 	int i, j;
 	int nVeto;
 	float sumVeto;
+	int newhits;
 
 	eall = 0;
 	for (i=0; i<cHits; i++) if (CleanEvent[i].type == TYPE_SIPM) eall += CleanEvent[i].amp;
 	eall /= SIPM2MEV;
 
-	EventTag = TAG_NONE;
+	EventFlags = 0;
 	EventEnergy = eall;
 
 //	VETO
@@ -1282,13 +1273,10 @@ void dshowMainFrame::CalculateTags(int cHits, long long gtime)
 		nVeto++;
 	}
 	
-	if (nVeto > 1 || sumVeto > VETOMIN) {
-		EventTag = TAG_VETO;
-		Recent[0].gTime = gtime;
-		Recent[0].Energy = eall;
+	if (nVeto > 1 || sumVeto > VETOMIN || EventEnergy > DVETOMIN) {
+		EventFlags |= FLAG_VETO;
 		// don't fill vertex
 		CommonData->hCuts->Fill(CUT_VETO);
-		return;
 	}
 //	Check for neutron
 //		Calculate parameters
@@ -1307,117 +1295,123 @@ void dshowMainFrame::CalculateTags(int cHits, long long gtime)
 		zsum += CleanEvent[i].z;
 	}
 	if (nx) {
-		xsum /= nx;
+		xsum *= WIDTH/nx;
 	} else {
 		xsum = -1;
 		CommonData->hCuts->Fill(CUT_NONX);
 	}
 	if (ny) {
-		ysum /= ny;
+		ysum *= WIDTH/ny;
 	} else {
 		ysum = -1;
 		CommonData->hCuts->Fill(CUT_NONY);
 	}
 	if (nx + ny) {
-		zsum /= nx + ny;
+		zsum *= THICK/(nx + ny);
 	} else {
 		zsum = -1;
 		CommonData->hCuts->Fill(CUT_NONZ);
 	}
+	EventStuck[EventStuckPos].VertexN[0] = xsum;
+	EventStuck[EventStuckPos].VertexN[1] = ysum;
+	EventStuck[EventStuckPos].VertexN[2] = zsum;
+
 //		Count clusters and neutron energy
-	ncHits = 0;
-	eclust = 0;
-	for (i=0; i<cHits; i++) if (CleanEvent[i].type == TYPE_SIPM) {
-		xy0 = (CleanEvent[i].z & 1) ? xsum : ysum;
-		if (xy0 > 0) {
-			r2 = (CleanEvent[i].xy - xy0) * (CleanEvent[i].xy - xy0) * WIDTH * WIDTH + (CleanEvent[i].z - zsum) * (CleanEvent[i].z - zsum) * THICK * THICK;
-			if (r2 > Pars.rMax * Pars.rMax) continue;
-		}
-		eclust += CleanEvent[i].amp;
-		ncHits++;
-	}
-	eclust /= SIPM2MEV;
+	ncHits = nx + ny;
 //		Implement criteria
-	if (ncHits >= Pars.nMin && eclust > Pars.eNMin && eclust < Pars.eNMax && eall - eclust < Pars.eNFraction) {
-		EventTag = TAG_NEUTRON;
-		EventEnergy = eclust;
-		Recent[2].Energy = eclust;
-		Recent[2].gTime = gtime;
-		Recent[2].Vertex[0] = xsum * WIDTH;
-		Recent[2].Vertex[1] = ysum * WIDTH;
-		Recent[2].Vertex[2] = zsum * THICK;
-		CommonData->hTagEnergy[1]->Fill(Recent[2].Energy);
-		CommonData->hTagXY[1]->Fill(Recent[2].Vertex[0], Recent[2].Vertex[1]);
-		CommonData->hTagZ[1]->Fill(Recent[2].Vertex[2]);
+	if (ncHits >= Pars.nMin && EventEnergy > Pars.eNMin && EventEnergy < Pars.eNMax) {
+		EventFlags |= FLAG_NEUTRON; 
+		CommonData->hTagEnergy[1]->Fill(EventEnergy);
+		CommonData->hTagXY[1]->Fill(xsum, ysum);
+		CommonData->hTagZ[1]->Fill(zsum);
 		CommonData->hCuts->Fill(CUT_NEUTRON);
-		return;
 	}
 	if (ncHits < Pars.nMin) CommonData->hCuts->Fill(CUT_NMULT);
 	if (eclust <= Pars.eNMin || eclust >= Pars.eNMax) CommonData->hCuts->Fill(CUT_NENERGY);
-	if (eall - eclust >= Pars.eNFraction) CommonData->hCuts->Fill(CUT_NFRACTION);
 	
 //		Check for pisitron
 //		Find consequtive cluster near EMAX strip
+//		find EMAX hit
 	E = 0;
+	j = 0;
+	eclust = 0;
+	xsum = ysum = zsum = 0;
+	exsum = eysum = 0;
 	for (i=0; i<cHits; i++) if (CleanEvent[i].type == TYPE_SIPM) if (CleanEvent[i].amp > E) {
 		E = CleanEvent[i].amp;
 		j = i;
 	}
-	ncHits = 0;
-	eclust = 0;
-	xsum = 0;
-	exsum = 0;
-	ysum = 0;
-	eysum = 0;
-	for (i=0; i<cHits; i++) if (CleanEvent[i].type == TYPE_SIPM && neighbors(CleanEvent[i].xy, CleanEvent[j].xy, CleanEvent[i].z, CleanEvent[j].z)) {
-		if (CleanEvent[i].z & 1) {	// X
-			exsum += CleanEvent[i].amp;
-			xsum += CleanEvent[i].amp * CleanEvent[i].xy;
+	if (E > 0) {
+//		Add EMAX hit to the sum
+		CleanEvent[j].in = 1;
+		ncHits = 1;
+		eclust = CleanEvent[j].amp;
+		if (CleanEvent[j].z & 1) {	// X
+			exsum = CleanEvent[j].amp;
+			xsum = CleanEvent[j].amp * CleanEvent[j].xy;
 		} else {			// Y
-			eysum += CleanEvent[i].amp;
-			ysum += CleanEvent[i].amp * CleanEvent[i].xy;
+			eysum = CleanEvent[j].amp;
+			ysum = CleanEvent[j].amp * CleanEvent[j].xy;
 		}
-		zsum += CleanEvent[i].amp * CleanEvent[i].z;
-		
-		ncHits++;
-		eclust += CleanEvent[i].amp;
+		zsum = CleanEvent[j].amp * CleanEvent[j].z;
+//		Look for neighbors
+		for (;;) {
+			newhits = 0;
+			for (i=0; i<cHits; i++) for (j=0; j<cHits; j++) if (CleanEvent[i].type == TYPE_SIPM && CleanEvent[j].in && !CleanEvent[i].in && neighbors(CleanEvent[i].xy, CleanEvent[j].xy, CleanEvent[i].z, CleanEvent[j].z)) {
+				if (CleanEvent[i].z & 1) {	// X
+					exsum += CleanEvent[i].amp;
+					xsum += CleanEvent[i].amp * CleanEvent[i].xy;
+				} else {			// Y
+					eysum += CleanEvent[i].amp;
+					ysum += CleanEvent[i].amp * CleanEvent[i].xy;
+				}
+				zsum += CleanEvent[i].amp * CleanEvent[i].z;
+				ncHits++;
+				eclust += CleanEvent[i].amp;
+				newhits++;
+				CleanEvent[i].in = 1;
+			}
+			if (!newhits) break;
+		}
 	}
 	eclust /= SIPM2MEV;
-	E /= SIPM2MEV;
 	if (exsum > 0) {
-		xsum /= exsum;
+		xsum *= WIDTH/exsum;
 	} else {
 		xsum = -1;
 	}
 	if (eysum > 0) {
-		ysum /= eysum;
+		ysum *= WIDTH/eysum;
 	} else {
 		ysum = -1;
 	}
 	if (exsum + eysum > 0) {
-		zsum /= exsum + eysum;
+		zsum *= THICK/(exsum + eysum);
 	} else {
 		zsum = -1;
 	}
+	ClusterEnergy = eclust;
+	EventStuck[EventStuckPos].VertexP[0] = xsum;
+	EventStuck[EventStuckPos].VertexP[1] = ysum;
+	EventStuck[EventStuckPos].VertexP[2] = zsum;
+	
 //		Implement criteria
-	if (E > Pars.eHitMin && ncHits <= Pars.nClustMax && eclust > Pars.ePosMin && eclust < Pars.ePosMax && eclust / eall > Pars.ePosFraction) {
-		EventTag = TAG_POSITRON;
+	if (ncHits <= Pars.nClustMax && eclust > Pars.ePosMin && eclust < Pars.ePosMax && EventEnergy - eclust < Pars.eGammaMax) {
+		EventFlags |= FLAG_POSITRON;
 		EventEnergy = eclust;
-		Recent[1].Energy = eclust;
-		Recent[1].gTime = gtime;
-		Recent[1].Vertex[0] = xsum * WIDTH;
-		Recent[1].Vertex[1] = ysum * WIDTH;
-		Recent[1].Vertex[2] = zsum * THICK;
-		CommonData->hTagEnergy[0]->Fill(Recent[1].Energy);
-		CommonData->hTagXY[0]->Fill(Recent[1].Vertex[0], Recent[1].Vertex[1]);
-		CommonData->hTagZ[0]->Fill(Recent[1].Vertex[2]);
+		CommonData->hTagEnergy[0]->Fill(ClusterEnergy);
+		CommonData->hTagXY[0]->Fill(xsum, ysum);
+		CommonData->hTagZ[0]->Fill(zsum);
 		CommonData->hCuts->Fill(CUT_POSITRON);
-		return;		
 	}
 	if (ncHits > Pars.nClustMax) CommonData->hCuts->Fill(CUT_PMULT);
-	if (E <= Pars.eHitMin || eclust <= Pars.ePosMin || eclust >= Pars.ePosMax) CommonData->hCuts->Fill(CUT_PENERGY);
-	if (eclust / eall <= Pars.ePosFraction) CommonData->hCuts->Fill(CUT_PFRACTION);
+	if (eclust <= Pars.ePosMin || eclust >= Pars.ePosMax) CommonData->hCuts->Fill(CUT_PENERGY);
+	if (EventEnergy - eclust >= Pars.eGammaMax) CommonData->hCuts->Fill(CUT_PFRACTION);
 	CommonData->hCuts->Fill(CUT_NONE);
+
+	EventStuck[EventStuckPos].Energy = EventEnergy;
+	EventStuck[EventStuckPos].ClusterEnergy = ClusterEnergy;
+	EventStuck[EventStuckPos].Flags = EventFlags;
 }
 
 /*	Process SelfTrigger					*/
@@ -1625,15 +1619,13 @@ void dshowMainFrame::ReadConfig(const char *fname)
 	}
 	
 //		Analysis parameters
-//	float eHitMin;
-	Pars.eHitMin = (config_lookup_float(&cnf, "Dshow.eHitMin", &dtmp)) ? dtmp : 0.4;
 //	Positron specific
 //	float ePosMin;
 	Pars.ePosMin = (config_lookup_float(&cnf, "Dshow.ePosMin", &dtmp)) ? dtmp : 1.0;
 //	float ePosMax;
-	Pars.ePosMax = (config_lookup_float(&cnf, "Dshow.ePosMax", &dtmp)) ? dtmp : 6.0;
-//	float ePosFraction;
-	Pars.ePosFraction = (config_lookup_float(&cnf, "Dshow.ePosFraction", &dtmp)) ? dtmp : 0.5;
+	Pars.ePosMax = (config_lookup_float(&cnf, "Dshow.ePosMax", &dtmp)) ? dtmp : 8.0;
+//	float eGammaMax;
+	Pars.eGammaMax = (config_lookup_float(&cnf, "Dshow.eGammaMax", &dtmp)) ? dtmp : 1.5;
 //	int nClustMax;
 	Pars.nClustMax = (config_lookup_int(&cnf, "Dshow.nClustMax", &tmp)) ? tmp : 4;
 //	Neutron cuts
@@ -1645,16 +1637,12 @@ void dshowMainFrame::ReadConfig(const char *fname)
 	Pars.eNMin = (config_lookup_float(&cnf, "Dshow.eNMin", &dtmp)) ? dtmp : 3.0;
 //	float eNMax;
 	Pars.eNMax = (config_lookup_float(&cnf, "Dshow.eNMax", &dtmp)) ? dtmp : 10.0;
-//	float rMax;
-	Pars.rMax = (config_lookup_float(&cnf, "Dshow.rMax", &dtmp)) ? dtmp : 20.0;
-//	float rMax;
-	Pars.eNFraction = (config_lookup_float(&cnf, "Dshow.eNFraction", &dtmp)) ? dtmp : 0.8;
 //	tNeutronCapture = 50;	// neutron capture time, us
 	Pars.tNeutronCapture = (config_lookup_float(&cnf, "Dshow.tNeutronCapture", &dtmp)) ? dtmp : 50;
-//	tMesoDecay = 5;		// Meso atom decay time, us
-	Pars.tMesoDecay = (config_lookup_float(&cnf, "Dshow.tMesoDecay", &dtmp)) ? dtmp : 5;
-//	NeutronPath = 30;		// Meso atom decay time, us
-	Pars.NeutronPath = (config_lookup_float(&cnf, "Dshow.NeutronPath", &dtmp)) ? dtmp : 30;
+//	NeutronPath = 100;		// Meso atom decay time, us
+	Pars.NeutronPath = (config_lookup_float(&cnf, "Dshow.NeutronPath", &dtmp)) ? dtmp : 100;
+//	NeutronPathZ = 40;		// Meso atom decay time, us
+	Pars.NeutronPathZ = (config_lookup_float(&cnf, "Dshow.NeutronPathZ", &dtmp)) ? dtmp : 100;
 //	int OutPort;			// Out port 0xB230
 	Pars.HostPort = (config_lookup_int(&cnf, "Sink.OutPort", &tmp)) ? tmp : 0xB230;
 //	char MyName[MAXSTR];		// The server host name
@@ -1671,12 +1659,28 @@ int dshowMainFrame::neighbors(int xy1, int xy2, int z1, int z2)
 	return 0;
 }
 
-/*	Read one record							*/
-/*	Return 1 if OK, negative on error, 0 on the EOF			*/
-/*	If iFollow wait till full record and doesn't return on EOF,	*/
-/*	otherwise partial record will produce an error.			*/
-/*	Watch for iStop. 						*/
-int GetRecord(char *buf, int buf_size, FILE *f, int iFollow, int *iStop)
+/*	Read one record.						*/
+/*	Return 1 if OK, negative on error, 0 on the EOF.		*/
+int GetFileRecord(char *buf, int buf_size, FILE *f)
+{
+	int irc;
+	int len;
+//		Read length
+	irc = fread(buf, sizeof(int), 1, f);
+	if (irc <= 0) return irc;	// Error or _normal_ EOF
+
+	len = *((int *)buf);
+	if (len < sizeof(int) || len > buf_size) return -2;	// strange length
+
+//		Read the rest
+	irc = fread(&buf[sizeof(int)], len - sizeof(int), 1, f);
+	return irc;	// Error and strange EOF and normal read
+}
+
+/*	Read one record	from TCP stream.				*/
+/*	Return 1 if OK, negative on error.				*/
+/*	Watch for iStop. Return 0 on iStop.				*/
+int GetTCPRecord(char *buf, int buf_size, FILE *f, int *iStop)
 {
 	int Cnt;
 	int irc;
@@ -1687,19 +1691,14 @@ int GetRecord(char *buf, int buf_size, FILE *f, int iFollow, int *iStop)
 	while (!(*iStop) && Cnt < sizeof(int)) {
 		irc = fread(&buf[Cnt], 1, sizeof(int) - Cnt, f);
 		if (irc < 0) {
-			if (errno == EAGAIN || errno == EINTR) continue;
-			return (iFollow) ? 0 : irc;	// Error 
+			return irc;		// Error !!!
 		} else if (irc == 0) {
-			if (iFollow) {
-				tm.tv_sec = 0;		// do some sleep and try to get more data
-				tm.tv_usec = 200000;
-				select(FD_SETSIZE, NULL, NULL, NULL, &tm);
-				continue;				
-			} else {
-				return 0;
-			}
+			tm.tv_sec = 0;		// do some sleep and try to get more data
+			tm.tv_usec = 100000;
+			select(FD_SETSIZE, NULL, NULL, NULL, &tm);
+		} else {
+			Cnt += irc;
 		}
-		Cnt += irc;
 	}
 
 	if (*iStop) return 0;
@@ -1711,22 +1710,18 @@ int GetRecord(char *buf, int buf_size, FILE *f, int iFollow, int *iStop)
 	while (!(*iStop) && Cnt < len) {
 		irc = fread(&buf[Cnt], 1, len - Cnt, f);
 		if (irc < 0) {
-			if (errno == EAGAIN || errno == EINTR) continue;
-			return (iFollow) ? 0 : irc;	// Error
-		}
-		Cnt += irc;
-		if (Cnt < len && iFollow) {
+			return irc;
+		} else if (irc == 0) {
 			tm.tv_sec = 0;		// do some sleep and try to get more data
-			tm.tv_usec = 200000;
+			tm.tv_usec = 100000;
 			select(FD_SETSIZE, NULL, NULL, NULL, &tm);			
-			continue;
+		} else {
+			Cnt += irc;
 		}
-		if (Cnt != len) return -3;	// Strange amount read
 	}
 	if (*iStop) return 0;
 	return 1;
 }
-
 /*	Open data file either directly or via zcat etc, depending on the extension	*/
 /*	Return some large length (12G) on compressed files				*/
 FILE* OpenDataFile(const char *fname, off_t *size) 
@@ -1803,6 +1798,7 @@ void *DataThreadFunction(void *ptr)
 	int FileCnt;
 	int nFiles;
 	char str[256];
+	time_t lastConnect;
 	
 	Main = (dshowMainFrame *)ptr;
 	CommonData = Main->CommonData;
@@ -1817,6 +1813,7 @@ void *DataThreadFunction(void *ptr)
 	
 	if (Main->Follow->IsDown()) {
 		fIn = OpenTCP(Main->Pars.HostName, Main->Pars.HostPort);
+		lastConnect = time(NULL);
 		nFiles = 0;
 		fsize = 0;
 		snprintf(str, sizeof(str), "Online(%s:%d)", Main->Pars.HostName, Main->Pars.HostPort);
@@ -1840,43 +1837,47 @@ void *DataThreadFunction(void *ptr)
 	Cnt = 0;
 	
 	while (!CommonData->iStop) {
-		irc = GetRecord(buf, BSIZE, fIn, Main->Follow->IsDown(), &CommonData->iStop);
+		irc = (Main->Follow->IsDown()) ? GetTCPRecord(buf, BSIZE, fIn, &CommonData->iStop) : GetFileRecord(buf, BSIZE, fIn);
 		if (irc < 0) {
+			if (Main->Follow->IsDown()) {
+				if (time(NULL) - lastConnect > 30) {	// Try to reconnect
+					sleep(5);
+					fIn = OpenTCP(Main->Pars.HostName, Main->Pars.HostPort);
+					if (!fIn) {
+						CommonData->iError = 15;
+						Main->Follow->SetState(kButtonUp);
+						break;
+					}
+					lastConnect = time(NULL);
+					continue;
+				} else {
+					Main->Follow->SetState(kButtonUp);
+				}
+			}
 			CommonData->iError = -irc;
 			break;
 		} else if (CommonData->iStop) {
 			break;
 		} else if (irc == 0) {
-			if (Main->Follow->IsDown()) {
+			//	check if we have file after
+			FileCnt++;
+			Main->PlayProgress->SetPosition(0);
+			Main->FileProgress->SetPosition(FileCnt * 100.0 / nFiles);
+			if (Main->PlayFile->fFileNamesList->After(f)) {
+				f = Main->PlayFile->fFileNamesList->After(f);
+				snprintf(str, sizeof(str), "%s (%d/%d)", f->GetName(), FileCnt + 1, nFiles);
+				Main->fStatusBar->SetText(str, 5);
 				fclose(fIn);
-				fIn = NULL;
-				while (!fIn) {
-					sleep(1);
-					if (CommonData->iStop || !Main->Follow->IsDown()) break;
-					fIn = OpenTCP(Main->Pars.HostName, Main->Pars.HostPort);
-				}
-				continue;
-			} else {
-				//	check if we have file after
-				FileCnt++;
-				Main->PlayProgress->SetPosition(0);
-				Main->FileProgress->SetPosition(FileCnt * 100.0 / nFiles);
-				if (Main->PlayFile->fFileNamesList->After(f)) {
-					f = Main->PlayFile->fFileNamesList->After(f);
-					snprintf(str, sizeof(str), "%s (%d/%d)", f->GetName(), FileCnt + 1, nFiles);
-					Main->fStatusBar->SetText(str, 5);
-					fclose(fIn);
-					fIn = OpenDataFile(f->GetName(), &fsize);
-					if (!fIn) {
-						CommonData->iError = 25;
-						break;
-					}
-					rsize = 0;
-					Cnt = 0;
-					continue;
-				} else {
+				fIn = OpenDataFile(f->GetName(), &fsize);
+				if (!fIn) {
+					CommonData->iError = 25;
 					break;
 				}
+				rsize = 0;
+				Cnt = 0;
+				continue;
+			} else {
+				break;
 			}
 		}
 		rsize += head->len;
@@ -1914,7 +1915,7 @@ void *DataThreadFunction(void *ptr)
 				Main->fStatusBar->SetText(str, 5);
 			}
 			Cnt = 0;
-		}	
+		}
 	}
 Ret:
 	if (fIn) fclose(fIn);

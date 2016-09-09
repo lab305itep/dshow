@@ -12,6 +12,7 @@
 //	20 MeV ~ 2100 channels
 #define PMT2MEV 105.0
 #define VETOMIN	500
+#define DVETOMIN 20.0
 #define RATELEN	1000
 //	A second in GTIME units 
 #define ONESECOND 125000000
@@ -47,12 +48,16 @@ struct evt_disp_struct {
 	char xy;
 	char z;
 	char chan;
+	char in;		// in cluster
 };
 
 struct event_struct {
 	long long gTime;
 	float Energy;
-	float Vertex[3];
+	float ClusterEnergy;
+	float VertexN[3];
+	float VertexP[3];
+	int Flags;
 };
 
 struct common_data_struct {
@@ -98,7 +103,7 @@ struct common_data_struct {
 	int EventLength;	// number of hits allocated
 	struct evt_disp_struct *Event;	// allocated by analysis for display
 	float EventEnergy;	// for display
-	int EventTag;		// for display
+	int EventFlags;		// for display
 	int thisEventCnt;	// current event number
 };
 
@@ -108,10 +113,9 @@ struct channel_struct {
 	char z;			// z : 0 - 99, x - odd, y - even.
 };
 
-#define TAG_NONE	0
-#define TAG_VETO	1
-#define TAG_POSITRON	2
-#define TAG_NEUTRON	3
+#define FLAG_VETO	1
+#define FLAG_POSITRON	2
+#define FLAG_NEUTRON	4
 
 #define CUT_NONE	0.5
 #define CUT_VETO	1.5
@@ -132,22 +136,19 @@ struct select_parm_struct {
 	char  HostName[256];
 	int HostPort;
 //	Positron cuts
-	float eHitMin;
 	float ePosMin;
 	float ePosMax;
-	float ePosFraction;
+	float eGammaMax;
 	int nClustMax;
 //	Neutron cuts
 	float nHitMin;
 	int nMin;
 	float eNMin;
 	float eNMax;
-	float rMax;
-	float eNFraction;
 //	Time windows
 	float tNeutronCapture;	// neutron capture time, us
-	float tMesoDecay;		// Meso atom decay time, us
 	float NeutronPath;
+	float NeutronPathZ;
 };
 
 void *DataThreadFunction(void *ptr);
@@ -160,10 +161,12 @@ private:
 	struct evt_disp_struct *CleanEvent;	// event under analysis, cleaned
 	int EventLength;		// allocated area in hits: Event
 	int CleanLength;		// allocated area in hits: CleanEvent
-	int EventTag;
+	int EventFlags;
 	float EventEnergy;
+	float ClusterEnergy;
 	struct select_parm_struct Pars;
-	struct event_struct Recent[3];	// Recent VETO, POSITRON and NEUTRON-like events correspondingly
+	struct event_struct EventStuck[1024];	// Recent events
+	int EventStuckPos;			// current event position in the stuck
 	
 	TThread *DataThread;
 	TGStatusBar *fStatusBar;
@@ -244,7 +247,7 @@ private:
 	void CreateNeutrinoTab(TGTab *tab);
 	void CreateMuonTab(TGTab *tab);
 	void DrawEvent(TCanvas *cv);
-	void CalculateTags(int nHits, long long gtime);
+	void CalculateTags(int nHits);
 	int neighbors(int xy1, int xy2, int z1, int z2);
 	void ReadConfig(const char *fname);
 public:
