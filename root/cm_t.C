@@ -74,8 +74,10 @@ void cm_e2s(void)
 	
 	TH2D *ha = fa.Get("hESEP2");
 	TH2D *hc = fc.Get("hESEP2");
+	if (!ha || !hc) return;
 	TH1D *hta = ha->ProjectionX("NO CM");
 	TH1D *htc = hc->ProjectionX("Neutron capture energy;SiPM, MeV");
+	if (!hta || !htc) return;
 
 	htc->SetTitle("Neutron capture energy;SiPM, MeV");
 	
@@ -85,8 +87,8 @@ void cm_e2s(void)
 	htc->Sumw2();
 	hta->Scale(1.126);
 
-	TH1D *htdiff;
-	htc->Copy(htdiff);
+	TH1D* htdiff = new TH1D("htdiff", "htdiff", 100, 0, 15);
+	htdiff = (TH1D*)htc->Clone();
 	htdiff->SetLineColor(kGreen);
 	htdiff->SetMarkerStyle(21);
 	htdiff->Add(hta, -1);
