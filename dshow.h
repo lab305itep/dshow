@@ -279,3 +279,6 @@ public:
 int FindMaxofShort(short int *data, int cnt);
 float FindHalfTime(short int *data, int cnt, int ampl);
 
+#define LOGFILENAME "dshow-debug.log"
+void Log(const char *msg, ...);
+

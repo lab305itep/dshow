@@ -1062,10 +1062,12 @@ void dshowMainFrame::ProcessEvent(char *data)
 		len = (rec->len + 1) * sizeof(short);
 
 		if (iptr + len > head->len) {
+			Log("Unexpected end of event: iptr = %d, len = %d, total len = %d.\n", iptr, len, head->len);
 			CommonData->ErrorCnt++;
 			return;
 		}
 		if (rec->module < 1 || rec->module > MAXWFD) {
+			Log("Module %d is out of range.\n", rec->module);
 			CommonData->ErrorCnt++;
 			continue;
 		}
@@ -1137,6 +1139,7 @@ void dshowMainFrame::ProcessEvent(char *data)
 		}
 	}
 	if (gTime < 0) {
+		Log("Trigger record (type = 2) was not found.\n");
 		CommonData->ErrorCnt++;
 		return;
 	}
@@ -1680,7 +1683,7 @@ int GetFileRecord(char *buf, int buf_size, FILE *f)
 /*	Read one record	from TCP stream.				*/
 /*	Return 1 if OK, negative on error.				*/
 /*	Watch for iStop. Return 0 on iStop.				*/
-int GetTCPRecord(char *buf, int buf_size, FILE *f, int *iStop)
+int GetTCPRecord(char *buf, int buf_size, int fd, int *iStop)
 {
 	int Cnt;
 	int irc;
@@ -1689,8 +1692,12 @@ int GetTCPRecord(char *buf, int buf_size, FILE *f, int *iStop)
 //		Read length
 	Cnt = 0;
 	while (!(*iStop) && Cnt < sizeof(int)) {
-		irc = fread(&buf[Cnt], 1, sizeof(int) - Cnt, f);
-		if (irc < 0) {
+		irc = read(fd, &buf[Cnt], sizeof(int) - Cnt);
+		if (irc < 0) Log("Read error (irc=%d) %m\n", irc);
+		if (irc < 0 && (errno == EINTR || errno == EAGAIN)) {
+			continue;
+		} else if (irc < 0) {
+			shutdown(fd, 2);
 			return irc;		// Error !!!
 		} else if (irc == 0) {
 			tm.tv_sec = 0;		// do some sleep and try to get more data
@@ -1704,12 +1711,20 @@ int GetTCPRecord(char *buf, int buf_size, FILE *f, int *iStop)
 	if (*iStop) return 0;
 
 	len = *((int *)buf);
-	if (len < sizeof(int) || len > buf_size) return -2;	// strange length
+	if (len < sizeof(int) || len > buf_size) {
+		Log("Strange block length (%d) from TCP. Buf_size = %d\n", len, buf_size);
+		shutdown(fd, 2);
+		return -2;	// strange length
+	}
 
 //		Read the rest
 	while (!(*iStop) && Cnt < len) {
-		irc = fread(&buf[Cnt], 1, len - Cnt, f);
-		if (irc < 0) {
+		irc = read(fd, &buf[Cnt], len - Cnt);
+		if (irc < 0) Log("Read error (irc=%d) %m\n", irc);
+		if (irc < 0 && (errno == EINTR || errno == EAGAIN)) {
+			continue;
+		} else if (irc < 0) {
+			shutdown(fd, 2);
 			return irc;
 		} else if (irc == 0) {
 			tm.tv_sec = 0;		// do some sleep and try to get more data
@@ -1751,33 +1766,28 @@ FILE* OpenDataFile(const char *fname, off_t *size)
 }
 
 /*	Open TCP connection to dsink							*/
-FILE* OpenTCP(const char *hname, int port) 
+int OpenTCP(const char *hname, int port) 
 {
-	FILE *f;
 	struct hostent *host;
 	struct sockaddr_in hostname;
 	int fd, flags, irc;
 	
 	host = gethostbyname(hname);
-	if (!host) return NULL;
+	if (!host) return -errno;
 	
 	hostname.sin_family = AF_INET;
 	hostname.sin_port = htons(port);
 	hostname.sin_addr = *(struct in_addr *) host->h_addr;
 
 	fd = socket(PF_INET, SOCK_STREAM, 0);
-	if (fd < 0) return NULL;
+	if (fd < 0) return -errno;
 	
 	if (connect(fd, (struct sockaddr *)&hostname, sizeof(hostname))) {
+		irc = -errno;
 		close(fd);
-		return NULL;
+		return irc;
 	}
-	f = fdopen(fd, "r");
-	if (!f) {
-		shutdown(fd, 2);
-		return NULL;
-	}
-	return f;
+	return fd;
 }
 
 /*	Data analysis thread				*/
@@ -1790,6 +1800,7 @@ void *DataThreadFunction(void *ptr)
 	int irc;
 	int mod, chan;
 	FILE *fIn;
+	int fdIn;
 	off_t fsize;
 	off_t rsize;
 	int iNum;
@@ -1810,9 +1821,11 @@ void *DataThreadFunction(void *ptr)
 		goto Ret;
 	}
 	head = (struct rec_header_struct *) buf;
+	fIn = NULL;
+	fdIn = 0;
 	
 	if (Main->Follow->IsDown()) {
-		fIn = OpenTCP(Main->Pars.HostName, Main->Pars.HostPort);
+		fdIn = OpenTCP(Main->Pars.HostName, Main->Pars.HostPort);
 		lastConnect = time(NULL);
 		nFiles = 0;
 		fsize = 0;
@@ -1823,7 +1836,7 @@ void *DataThreadFunction(void *ptr)
 		nFiles = Main->PlayFile->fFileNamesList->GetEntries();
 		snprintf(str, sizeof(str), "%s (%d/%d)", f->GetName(), FileCnt + 1, nFiles);
 	}
-	if (!fIn) {
+	if (!fIn && fdIn <= 0) {
 		CommonData->iError = 15;
 		if (Main->Follow->IsDown()) Main->Follow->SetState(kButtonUp);
 		goto Ret;
@@ -1837,13 +1850,13 @@ void *DataThreadFunction(void *ptr)
 	Cnt = 0;
 	
 	while (!CommonData->iStop) {
-		irc = (Main->Follow->IsDown()) ? GetTCPRecord(buf, BSIZE, fIn, &CommonData->iStop) : GetFileRecord(buf, BSIZE, fIn);
+		irc = (Main->Follow->IsDown()) ? GetTCPRecord(buf, BSIZE, fdIn, &CommonData->iStop) : GetFileRecord(buf, BSIZE, fIn);
 		if (irc < 0) {
 			if (Main->Follow->IsDown()) {
 				if (time(NULL) - lastConnect > 30) {	// Try to reconnect
 					sleep(5);
-					fIn = OpenTCP(Main->Pars.HostName, Main->Pars.HostPort);
-					if (!fIn) {
+					fdIn = OpenTCP(Main->Pars.HostName, Main->Pars.HostPort);
+					if (fdIn <= 0) {
 						CommonData->iError = 15;
 						Main->Follow->SetState(kButtonUp);
 						break;
@@ -1851,6 +1864,7 @@ void *DataThreadFunction(void *ptr)
 					lastConnect = time(NULL);
 					continue;
 				} else {
+					fdIn = irc;
 					Main->Follow->SetState(kButtonUp);
 				}
 			}
@@ -1892,15 +1906,18 @@ void *DataThreadFunction(void *ptr)
 				mod = head->type & 0xFFFF;
 				chan = (head->type >> 16) & 0xFF;
 				if (chan >=64 || mod > MAXWFD) {
+					Log("Channel (%d) or module (%d) out of range for selftrigger.\n", chan, mod);
 					CommonData->ErrorCnt++;					
 				} else {
 					Main->ProcessSelfTrig(mod, chan, (struct hw_rec_struct_self *)(buf + sizeof(struct rec_header_struct)));
 					CommonData->SelfTrigCnt++;
 				}
 			} else {
+				Log("Unknown block received: type=0x%X, len=%d.\n", head->type, head->len);
 				CommonData->ErrorCnt++;	
 			}
 		} else {
+			Log("The block length (%d) is too small.\n", head->len);
 			CommonData->ErrorCnt++;
 		}
 		TThread::UnLock();
@@ -1919,6 +1936,7 @@ void *DataThreadFunction(void *ptr)
 	}
 Ret:
 	if (fIn) fclose(fIn);
+	if (fdIn > 0) close(fdIn);
 	Main->fStatusBar->SetText("", 5);
 	if (buf) free(buf);
 	return NULL;
@@ -1943,8 +1961,26 @@ float FindHalfTime(short int *data, int cnt, int amp)
 	return i + r - 1;
 }
 
+void Log(const char *msg, ...)
+{
+	char str[1024];
+	time_t t;
+	FILE *f;
+	va_list ap;
+
+	va_start(ap, msg);
+	t = time(NULL);
+	strftime(str, sizeof(str),"%F %T ", localtime(&t));
+	f = fopen(LOGFILENAME, "at");
+	fprintf(f, str);
+	vfprintf(f, msg, ap);
+	va_end(ap);
+	fclose(f);
+}
+
 /*	the main						*/
-int main(int argc, char **argv) {
+int main(int argc, char **argv) 
+{
    	TApplication theApp("DANSS_SHOW", &argc, argv);
    	dshowMainFrame *frame = new dshowMainFrame(gClient->GetRoot(), 2000, 1000, (argc > 1) ? argv[1] : DEFCONFIG);
    	theApp.Run();
