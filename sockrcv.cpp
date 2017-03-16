@@ -30,6 +30,7 @@ int main()
 	int *buf;
 	int fd;
 	int i;
+	int irc;
 
 	buf = (int *)malloc(0x10000);
 	if (!buf) return -10;
@@ -38,12 +39,10 @@ int main()
 	if (fd < 0) return fd;
 
 	for(i=0;;i++) {
-		read(fd, buf, 0x10000);
-//		printf(">");
-		if (!(i&1023)) printf(" %d: %d\n", i, buf[0]);
-//		fflush(stdout);
+		irc = read(fd, buf, 0x10000);
+		printf(" %d: irc = %d buf = %d %d %d %d %d\n", i, irc, buf[0], buf[1], buf[2], buf[3], buf[4]);
 	}
 
-	return 0;	
+	return 0;
 }
 

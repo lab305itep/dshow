@@ -1,6 +1,5 @@
 #include <TGFrame.h>
 
-#define UDPPORT	0xA230
 #define BSIZE 0x800000
 #define MAXWFD 70
 #define NSPERCHAN 8.0
