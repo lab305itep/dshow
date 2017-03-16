@@ -44,19 +44,22 @@
 #include <unistd.h>
 #include "dshow.h"
 #include "recformat.h"
+#include "dshow_globasl.h"
 
 const char *DataFileTypes[] = {"Data files", "*.dat*", "All files", "*", 0, 0};
 const char *SaveFileTypes[] = {"Root files", "*.root", "PDF", "*.pdf", "PostScript", "*.ps", "JPEG", "*.jpg", "GIF", "*.gif", "PNG", "*.png", "All files", "*", 0, 0};
-const char *RateName[] = {"All", "NO veto"};
-const char *CutName[] = {"NONE", "VETO", "POSITRON", "NEUTRON", "NOSITIME", "NONX", "NONY", "NONZ", "NMULT", "NENERGY", "NFRACT", "PMULT", "PENERGY", "PFRACT"};
+
+struct common_data_struct Run;
+struct channel_struct Map[MAXWFD][64];
+struct common_parameters_struct Conf;
 
 /*	Class dshowMainFrame - the main window		*/
 /*	Main window Constructor				*/
-dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h, const char *cfgname) : TGMainFrame(p, w, h) 
+dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h) : TGMainFrame(p, w, h) 
 {
 	char strs[64];
 	char strl[1024];
-	Int_t StatusBarParts[] = {10, 10, 10, 10, 10, 50};	// status bar parts
+	Int_t StatusBarParts[] = {30, 10, 10, 10, 10, 30};	// status bar parts
 	Double_t RGB_r[]    = {0., 0.0, 1.0, 1.0, 1.0};
    	Double_t RGB_g[]    = {0., 0.0, 0.0, 1.0, 1.0};
    	Double_t RGB_b[]    = {0., 1.0, 0.0, 0.0, 1.0};
@@ -64,99 +67,15 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h, const char
 	int i, n;
 	TGLabel *lb;
 	
-	ReadConfig(cfgname);
 	// Create our data structures and histogramms
-	CommonData = (struct common_data_struct *) malloc(sizeof(struct common_data_struct));
-	memset(CommonData, 0, sizeof(struct common_data_struct));
-	Event = NULL;
-	EventLength = 0;
-	CleanEvent = NULL;
-	CleanLength = 0;
-	EventStuckPos = 0;
-	memset(EventStuck, 0, sizeof(EventStuck));
-
 	gROOT->SetStyle("Plain");
 	gStyle->SetOptStat("e");
 	gStyle->SetOptFit(11);
-	for(i=0; i<MAXWFD; i++) {
-		snprintf(strs, sizeof(strs), "hAmpS%2.2d", i+1);
-		snprintf(strl, sizeof(strl), "Module %2.2d: amplitude versus channels number (self)", i+1);		
-		CommonData->hAmpS[i] = new TH2D(strs, strl, 64, 0, 64, 128, 0, 128);
-		snprintf(strs, sizeof(strs), "hAmpE%2.2d", i+1);
-		snprintf(strl, sizeof(strl), "Module %2.2d: amplitude versus channels number (event)", i+1);
-		CommonData->hAmpE[i] = new TH2D(strs, strl, 64, 0, 64, 256, 0, 4096);
-		snprintf(strs, sizeof(strs), "hTimeA%2.2d", i+1);
-		snprintf(strl, sizeof(strl), "Module %2.2d: time versus channels number, all hits", i+1);
-		CommonData->hTimeA[i] = new TH2D(strs, strl, 64, 0, 64, 100, 0, 512);
-		snprintf(strs, sizeof(strs), "hTimeB%2.2d", i+1);
-		snprintf(strl, sizeof(strl), "Module %2.2d: time versus channels number, amplitude above threshold", i+1);
-		CommonData->hTimeB[i] = new TH2D(strs, strl, 64, 0, 64, 100, 0, 512);
-		CommonData->hTimeB[i]->SetLineColor(kBlue);
-		snprintf(strs, sizeof(strs), "hTimeC%2.2d", i+1);
-		snprintf(strl, sizeof(strl), "Module %2.2d: time versus channels number relative to common SiPM time, amplitude above threshold", i+1);
-		CommonData->hTimeC[i] = new TH2D(strs, strl, 64, 0, 64, 400, -200, 200);
-	}
 //	TLegend
 	TimeLegend = new TLegend(0.65, 0.8, 0.99, 0.89);
-	TimeLegend->AddEntry(CommonData->hTimeA[0], "All events", "L");
-	TimeLegend->AddEntry(CommonData->hTimeB[0], "Amplitude above threshold", "L");
+	TimeLegend->AddEntry(Run.hTimeA[0], "All events", "L");
+	TimeLegend->AddEntry(Run.hTimeB[0], "Amplitude above threshold", "L");
 	TimeLegend->SetFillColor(kWhite);
-
-//	TH1D *hSiPMsum[2];	// SiPM summa, all/no veto
-	CommonData->hSiPMsum[0] = new TH1D("hSiPMsum0", "Sum of all SiPM counts, MeV", 200, 0, 10.0);
-	CommonData->hSiPMsum[1] = new TH1D("hSiPMsum1", "Sum of all SiPM counts, no veto, MeV", 200, 0, 10.0);
-	CommonData->hSiPMsum[1]->SetLineColor(kBlue);
-//	TH1D *hSiPMhits[2];	// SiPM Hits, all/no veto
-	CommonData->hSiPMhits[0] = new TH1D("hSiPMhits0", "Number of SiPM hits per event", 200, 0, 200);
-	CommonData->hSiPMhits[1] = new TH1D("hSiPMhits1", "Number of SiPM hits per event, no veto", 200, 0, 200);
-	CommonData->hSiPMhits[1]->SetLineColor(kBlue);
-//	TH1D *hPMTsum[2];	// PMT summa, all/no veto
-	CommonData->hPMTsum[0] = new TH1D("hPMTsum0", "Sum of all PMT counts, MeV", 200, 0, 10.0);
-	CommonData->hPMTsum[1] = new TH1D("hPMTsum1", "Sum of all PMT counts, no veto, MeV", 200, 0, 10.0);
-	CommonData->hPMTsum[1]->SetLineColor(kBlue);
-//	TH1D *hPMThits[2];	// PMT Hits, all/no veto
-	CommonData->hPMThits[0] = new TH1D("hPMThits0", "Number of PMT hits per event", 50, 0, 50);
-	CommonData->hPMThits[1] = new TH1D("hPMThits1", "Number of PMT hits per event, no veto", 50, 0, 50);
-	CommonData->hPMThits[1]->SetLineColor(kBlue);
-//	TH1D *hSPRatio[2];	// SiPM sum to PTMT sum ratio, all/no veto
-	CommonData->hSPRatio[0] = new TH1D("hSPRatio0", "SiPM to PMT ratio", 100, 0, 5.0);
-	CommonData->hSPRatio[1] = new TH1D("hSPRatio1", "SiPM to PMT ratio, no veto", 100, 0, 5.0);
-	CommonData->hSPRatio[1]->SetLineColor(kBlue);
-//	TLegend
-	SummaLegend = new TLegend(0.6, 0.75, 0.9, 0.9);
-	SummaLegend->AddEntry(CommonData->hSiPMsum[0], "All events", "L");
-	SummaLegend->AddEntry(CommonData->hSiPMsum[1], "NO veto", "L");
-	SummaLegend->SetFillColor(kWhite);
-//	Cuts
-	n = sizeof(CutName) / sizeof(CutName[0]);
-	CommonData->hCuts = new TH1D("hCuts", "Various cuts", n, 0, n);
-	for (i=0; i<n; i++) CommonData->hCuts->GetXaxis()->SetBinLabel(i+1, CutName[i]);
-//	Taged events distributions
-	CommonData->hTagEnergy[0] = new TH1D("hEPositron", "Energy distribution of positron-like events;MeV", 100, 0, 10);
-	CommonData->hTagEnergy[1] = new TH1D("hENeutron", "Energy distribution of neutron-like events;MeV", 100, 0, 10);
-	CommonData->hTagXY[0] = new TH2D("hXYPositron", "XY-distribution of positron-like events;cm;cm", 25, 0, 100, 25, 0, 100);
-	CommonData->hTagXY[1] = new TH2D("hXYNeutron", "XY-distribution of neutron-like events;cm;cm", 25, 0, 100, 25, 0, 100);
-	CommonData->hTagZ[0] = new TH1D("hZPositron", "Z-distribution of positron-like events;cm", 100, 0, 100);
-	CommonData->hTagZ[1] = new TH1D("hZNeutron", "Z-distribution of neutron-like events;cm", 100, 0, 100);	
-//	Rate
-	CommonData->hRate = new TH1D("hRate", "Trigger rate, Hz;s", RATELEN, -RATEPER * RATELEN, 0);
-	CommonData->hRate->SetStats(0);
-	CommonData->hRate->SetMarkerStyle(20);
-	CommonData->hRate->SetMarkerColor(kBlue);
-	CommonData->fRate = (float *) malloc(RATELEN * sizeof(float));
-	memset(CommonData->fRate, 0, RATELEN * sizeof(float));
-	CommonData->iRatePos = 0;
-	CommonData->gLastTime = -1;
-//	Neutrino events
-	CommonData->hNeutrinoEnergy[0] = new TH1D("hEPositronN", "Energy distribution of positrons in neutrino-like events;MeV", 100, 0, 10);
-	CommonData->hNeutrinoEnergy[1] = new TH1D("hENeutronN", "Energy distribution of neutron capture in neutrino-like events;MeV", 100, 0, 10);
-	CommonData->hCaptureTime = new TH1D("hCaptureTime", "Time distribution of neutron capture in neutrino-like events;us", 25, 0, 50);
-	CommonData->hNeutronPath = new TH1D("hNeutronPath", "Distance from positron cluster to neutron cluster;cm", 50, 0, 100);
-//	Muon capture events
-	CommonData->hMesoEnergy[0] = new TH1D("hEPositronM", "Energy distribution of positrons in mesoatom-like events;MeV", 100, 0, 10);
-	CommonData->hMesoEnergy[1] = new TH1D("hENeutronM", "Energy distribution of neutron capture in mesoatom-like events;MeV", 100, 0, 10);
-	CommonData->hMesoTime[0] = new TH1D("hMesoTime", "Time distribution of mesoatom decay in mesoatom-like events;us", 25, 0, 5);
-	CommonData->hMesoTime[1] = new TH1D("hCaptureTimeM", "Time distribution of neutron capture in mesoatom-like events;us", 25, 0, 50);
 
 	PlayFile = new TGFileInfo();
 	PlayFile->fFileTypes = DataFileTypes;
@@ -182,11 +101,7 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h, const char
 	CreateSpectrumTab(tab);
 	CreateTimeTab(tab);
 	CreateEventTab(tab);
-	CreateSummaTab(tab);
 	CreateRateTab(tab);
-	CreateTagTab(tab);
-	CreateNeutrinoTab(tab);
-	CreateMuonTab(tab);
 	hframe->AddFrame(tab, new TGLayoutHints(kLHintsExpandX | kLHintsExpandY, 5, 5, 3, 4));
 	
    	TGVerticalFrame *vframe=new TGVerticalFrame(hframe, 50, h);
@@ -264,6 +179,7 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h, const char
 	fStatusBar = new TGStatusBar(this, 50, 10, kHorizontalFrame);
 	fStatusBar->SetParts(StatusBarParts, sizeof(StatusBarParts) / sizeof(Int_t));
 	AddFrame(fStatusBar, new TGLayoutHints(kLHintsBottom | kLHintsExpandX, 0, 0, 2, 0));
+	Run.msg[0] = '\0';
 
    	// Sets window name and shows the main frame
    	SetWindowName("DANSS Show. Version of " __TIMESTAMP__ ".");
@@ -282,7 +198,7 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h, const char
 /*	Main Window destructor				*/
 dshowMainFrame::~dshowMainFrame(void) 
 {
-	CommonData->iStop = 1;
+	Run.iStop = 1;
 	delete OneSecond;
 	if (DataThread) DataThread->Join();
 	Cleanup();
@@ -390,19 +306,11 @@ void dshowMainFrame::CreateTimeTab(TGTab *tab)
 	rTimeAll->SetState(kButtonDown);
    	hframe->AddFrame(bg, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));
 
-	TGLabel *lb = new TGLabel(hframe, "Threshold:");
-   	hframe->AddFrame(lb, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));		
-	nTimeBThreshold = new TGNumberEntry(hframe, 0, 5, -1, TGNumberFormat::kNESInteger, TGNumberFormat::kNEANonNegative);
-	CommonData->TimeBThreshold = 50;
-	nTimeBThreshold->SetIntNumber(CommonData->TimeBThreshold);
-	nTimeBThreshold->Connect("ValueSet(Long_t)", "dshowMainFrame", this, "ChangeTimeBThr()");
-   	hframe->AddFrame(nTimeBThreshold, new TGLayoutHints(kLHintsLeft  | kLHintsCenterY, 5, 5, 3, 4));
-
 	lb = new TGLabel(hframe, "SiPM +- Time window, ns:");
    	hframe->AddFrame(lb, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 15, 5, 3, 4));
 	nSiPMWindow = new TGNumberEntry(hframe, 0, 5, -1, TGNumberFormat::kNESRealTwo, TGNumberFormat::kNEANonNegative);
-	CommonData->SiPMWindow = 20;	// ns
-	nSiPMWindow->SetNumber(CommonData->SiPMWindow);
+	Run.SiPMWindow = 20;	// ns
+	nSiPMWindow->SetNumber(Run.SiPMWindow);
 	nSiPMWindow->Connect("ValueSet(Long_t)", "dshowMainFrame", this, "ChangeSummaPars()");
    	hframe->AddFrame(nSiPMWindow, new TGLayoutHints(kLHintsLeft  | kLHintsCenterY, 5, 5, 3, 4));
 
@@ -465,33 +373,6 @@ void dshowMainFrame::CreateEventTab(TGTab *tab)
     	me->AddFrame(hframe, new TGLayoutHints(kLHintsBottom | kLHintsExpandX, 2, 2, 2, 2));
 }
 
-/*	Create event summa tab				*/
-void dshowMainFrame::CreateSummaTab(TGTab *tab)
-{
-	TGLabel *lb;
-
-	TGCompositeFrame *me = tab->AddTab("Summa");
-
-	fSummaCanvas = new TRootEmbeddedCanvas ("SummaCanvas", me, 1600, 800);
-   	me->AddFrame(fSummaCanvas, new TGLayoutHints(kLHintsExpandX | kLHintsExpandY, 10, 10, 10, 1));
-
-   	TGHorizontalFrame *hframe=new TGHorizontalFrame(me);
-
-	lb = new TGLabel(hframe, "SiPM Threshold:");
-   	hframe->AddFrame(lb, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));		
-	SummaSiPMThreshold = new TGNumberEntry(hframe, 0, 5, -1, TGNumberFormat::kNESInteger, TGNumberFormat::kNEANonNegative);
-	CommonData->SummaSiPMThreshold = 30;
-	SummaSiPMThreshold->SetIntNumber(CommonData->SummaSiPMThreshold);
-	SummaSiPMThreshold->Connect("ValueSet(Long_t)", "dshowMainFrame", this, "ChangeSummaPars()");
-   	hframe->AddFrame(SummaSiPMThreshold, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));
-
-   	TGTextButton *reset = new TGTextButton(hframe,"&Reset");
-	reset->Connect("Clicked()", "dshowMainFrame", this, "ResetSummaHists()");
-   	hframe->AddFrame(reset, new TGLayoutHints(kLHintsCenterY | kLHintsRight, 5, 5, 3, 4));
-
-    	me->AddFrame(hframe, new TGLayoutHints(kLHintsBottom | kLHintsExpandX, 2, 2, 2, 2));
-}
-
 /*	Create event rate tab				*/
 void dshowMainFrame::CreateRateTab(TGTab *tab)
 {
@@ -501,52 +382,32 @@ void dshowMainFrame::CreateRateTab(TGTab *tab)
    	me->AddFrame(fRateCanvas, new TGLayoutHints(kLHintsExpandX | kLHintsExpandY, 10, 10, 10, 1));
 }
 
-/*	Create Tagged event parameters tab				*/
-void dshowMainFrame::CreateTagTab(TGTab *tab)
+/*	Create histogramms						*/
+void dshowMainFrame::InitHists(void)
 {
-	TGCompositeFrame *me = tab->AddTab("Positron & Neutron");
+	int i;
+	char strs[128];
+	char strl[1024];
 
-	fTagCanvas = new TRootEmbeddedCanvas ("TagCanvas", me, 1600, 800);
-   	me->AddFrame(fTagCanvas, new TGLayoutHints(kLHintsExpandX | kLHintsExpandY, 10, 10, 10, 1));
-
-   	TGHorizontalFrame *hframe=new TGHorizontalFrame(me);
-   	TGTextButton *reset = new TGTextButton(hframe,"&Reset");
-	reset->Connect("Clicked()", "dshowMainFrame", this, "ResetTagHists()");
-   	hframe->AddFrame(reset, new TGLayoutHints(kLHintsCenterY | kLHintsRight, 5, 5, 3, 4));
-
-    	me->AddFrame(hframe, new TGLayoutHints(kLHintsBottom | kLHintsExpandX, 2, 2, 2, 2));
-}
-
-/*	Create Neutrino event parameters tab				*/
-void dshowMainFrame::CreateNeutrinoTab(TGTab *tab)
-{
-	TGCompositeFrame *me = tab->AddTab("Neutrino");
-
-	fNeutrinoCanvas = new TRootEmbeddedCanvas ("NeutrinoCanvas", me, 1600, 800);
-   	me->AddFrame(fNeutrinoCanvas, new TGLayoutHints(kLHintsExpandX | kLHintsExpandY, 10, 10, 10, 1));
-
-   	TGHorizontalFrame *hframe=new TGHorizontalFrame(me);
-   	TGTextButton *reset = new TGTextButton(hframe,"&Reset");
-	reset->Connect("Clicked()", "dshowMainFrame", this, "ResetNeutrinoHists()");
-   	hframe->AddFrame(reset, new TGLayoutHints(kLHintsCenterY | kLHintsRight, 5, 5, 3, 4));
-
-    	me->AddFrame(hframe, new TGLayoutHints(kLHintsBottom | kLHintsExpandX, 2, 2, 2, 2));
-}
-
-/*	Create Mesoatom event parameters tab				*/
-void dshowMainFrame::CreateMuonTab(TGTab *tab)
-{
-	TGCompositeFrame *me = tab->AddTab("Mesoatom");
-
-	fMuonCanvas = new TRootEmbeddedCanvas ("MuonCanvas", me, 1600, 800);
-   	me->AddFrame(fMuonCanvas, new TGLayoutHints(kLHintsExpandX | kLHintsExpandY, 10, 10, 10, 1));
-
-   	TGHorizontalFrame *hframe=new TGHorizontalFrame(me);
-   	TGTextButton *reset = new TGTextButton(hframe,"&Reset");
-	reset->Connect("Clicked()", "dshowMainFrame", this, "ResetMuonHists()");
-   	hframe->AddFrame(reset, new TGLayoutHints(kLHintsCenterY | kLHintsRight, 5, 5, 3, 4));
-
-    	me->AddFrame(hframe, new TGLayoutHints(kLHintsBottom | kLHintsExpandX, 2, 2, 2, 2));
+	for(i=0; i<MAXWFD; i++) {
+		snprintf(strs, sizeof(strs), "hAmpS%2.2d", i+1);
+		snprintf(strl, sizeof(strl), "Module %2.2d: amplitude versus channels number (self)", i+1);		
+		Run.hAmpS[i] = new TH2D(strs, strl, 64, 0, 64, 128, 0, 128);
+		snprintf(strs, sizeof(strs), "hAmpE%2.2d", i+1);
+		snprintf(strl, sizeof(strl), "Module %2.2d: amplitude versus channels number (event)", i+1);
+		Run.hAmpE[i] = new TH2D(strs, strl, 64, 0, 64, 256, 0, 4096);
+		snprintf(strs, sizeof(strs), "hTimeA%2.2d", i+1);
+		snprintf(strl, sizeof(strl), "Module %2.2d: time versus channels number, all hits", i+1);
+		Run.hTimeA[i] = new TH2D(strs, strl, 64, 0, 64, 100, 0, 512);
+		snprintf(strs, sizeof(strs), "hTimeB%2.2d", i+1);
+		snprintf(strl, sizeof(strl), "Module %2.2d: time versus channels number, amplitude above threshold", i+1);
+		Run.hTimeB[i] = new TH2D(strs, strl, 64, 0, 64, 100, 0, 512);
+		Run.hTimeB[i]->SetLineColor(kBlue);
+		snprintf(strs, sizeof(strs), "hTimeC%2.2d", i+1);
+		snprintf(strl, sizeof(strl), "Module %2.2d: time versus channels number relative to common SiPM time, amplitude above threshold", i+1);
+		Run.hTimeC[i] = new TH2D(strs, strl, 64, 0, 64, 400, -200, 200);
+	}
+	Run.DisplayEvent = NULL;
 }
 
 
@@ -579,28 +440,28 @@ void dshowMainFrame::DoDraw(void)
 	TThread::Lock();
 
 /*		Status bar		*/
-	snprintf(str, sizeof(str), "Thread status: %d", CommonData->iError);
-	fStatusBar->SetText(str ,0);
-	snprintf(str, sizeof(str), "Blocks: %d", CommonData->BlockCnt);
+	fStatusBar->SetText(msg ,0);
+	snprintf(str, sizeof(str), "Blocks: %d", Run.BlockCnt);
 	fStatusBar->SetText(str, 1);
-	snprintf(str, sizeof(str), "Events: %d", CommonData->EventCnt);
+	snprintf(str, sizeof(str), "Events: %d", Run.EventCnt);
 	fStatusBar->SetText(str, 2);
-	snprintf(str, sizeof(str), "SelfTriggers: %d", CommonData->SelfTrigCnt);
+	snprintf(str, sizeof(str), "SelfTriggers: %d", Run.SelfTrigCnt);
 	fStatusBar->SetText(str, 3);
-	snprintf(str, sizeof(str), "Errors: %d", CommonData->ErrorCnt);
+	snprintf(str, sizeof(str), "Errors: %d", Run.ErrorCnt);
 	fStatusBar->SetText(str, 4);
+/*		File processing status	*/
 
 /*		Scope			*/
    	fCanvas = fWaveCanvas->GetCanvas();
    	fCanvas->cd();
-	if (CommonData->hWaveForm) {
-		CommonData->hWaveForm->SetMinimum(CommonData->hWaveForm->GetMinimum() - 2);
-		CommonData->hWaveForm->SetMarkerSize(2);
-		CommonData->hWaveForm->SetMarkerColor(kBlue);
-		CommonData->hWaveForm->SetMarkerStyle(20);
-		CommonData->hWaveForm->DrawCopy("p");
-		delete CommonData->hWaveForm;
-		CommonData->hWaveForm = NULL;
+	if (Run.hWaveForm) {
+		Run.hWaveForm->SetMinimum(Run.hWaveForm->GetMinimum() - 2);
+		Run.hWaveForm->SetMarkerSize(2);
+		Run.hWaveForm->SetMarkerColor(kBlue);
+		Run.hWaveForm->SetMarkerStyle(20);
+		Run.hWaveForm->DrawCopy("p");
+		delete Run.hWaveForm;
+		Run.hWaveForm = NULL;
 	}
    	fCanvas->Update();
 
@@ -609,20 +470,20 @@ void dshowMainFrame::DoDraw(void)
    	fCanvas->cd();
 	if (rSelf2D->IsOn()) {
 		sprintf(str, "Module: %d. Amplitude versus channel number.", mod + 1);
-		CommonData->hAmpS[mod]->SetTitle(str);
-		CommonData->hAmpS[mod]->Draw("color");
+		Run.hAmpS[mod]->SetTitle(str);
+		Run.hAmpS[mod]->Draw("color");
 	} else if (rSelfChan->IsOn()) {
 		sprintf(str, "Module: %d. Channel occupancy.", mod + 1);
-		CommonData->hAmpS[mod]->ProjectionX()->SetTitle(str);
-		CommonData->hAmpS[mod]->ProjectionX()->Draw();	
+		Run.hAmpS[mod]->ProjectionX()->SetTitle(str);
+		Run.hAmpS[mod]->ProjectionX()->Draw();	
 	} else if (rSelfAll->IsOn()) {
 		sprintf(str, "Module: %d. Amplitude distribution for all channels.", mod + 1);
-		CommonData->hAmpS[mod]->ProjectionY()->SetTitle(str);
-		CommonData->hAmpS[mod]->ProjectionY()->Draw();
+		Run.hAmpS[mod]->ProjectionY()->SetTitle(str);
+		Run.hAmpS[mod]->ProjectionY()->Draw();
 	} else if (rSelfSingle->IsOn()) {
 		sprintf(str, "Module: %d. Amplitude distribution for channel %d.", mod + 1, chan);
-		CommonData->hAmpS[mod]->ProjectionY("_py", chan + 1, chan + 1)->SetTitle(str);
-		CommonData->hAmpS[mod]->ProjectionY("_py", chan + 1, chan + 1)->Draw();
+		Run.hAmpS[mod]->ProjectionY("_py", chan + 1, chan + 1)->SetTitle(str);
+		Run.hAmpS[mod]->ProjectionY("_py", chan + 1, chan + 1)->Draw();
 	}
    	fCanvas->Update();
 
@@ -631,20 +492,20 @@ void dshowMainFrame::DoDraw(void)
    	fCanvas->cd();
 	if (rSpect2D->IsOn()) {
 		sprintf(str, "Module: %d. Amplitude versus channel number.", mod + 1);
-		CommonData->hAmpE[mod]->SetTitle(str);
-		CommonData->hAmpE[mod]->Draw("color");
+		Run.hAmpE[mod]->SetTitle(str);
+		Run.hAmpE[mod]->Draw("color");
 	} else if (rSpectChan->IsOn()) {
 		sprintf(str, "Module: %d. Channel occupancy.", mod + 1);
-		CommonData->hAmpE[mod]->ProjectionX()->SetTitle(str);
-		CommonData->hAmpE[mod]->ProjectionX()->Draw();	
+		Run.hAmpE[mod]->ProjectionX()->SetTitle(str);
+		Run.hAmpE[mod]->ProjectionX()->Draw();	
 	} else if (rSpectAll->IsOn()) {
 		sprintf(str, "Module: %d. Amplitude distribution for all channels.", mod + 1);
-		CommonData->hAmpE[mod]->ProjectionY()->SetTitle(str);
-		CommonData->hAmpE[mod]->ProjectionY()->Draw();
+		Run.hAmpE[mod]->ProjectionY()->SetTitle(str);
+		Run.hAmpE[mod]->ProjectionY()->Draw();
 	} else if (rSpectSingle->IsOn()) {
 		sprintf(str, "Module: %d. Amplitude distribution for channel %d.", mod + 1, chan);
-		CommonData->hAmpE[mod]->ProjectionY("_py", chan + 1, chan + 1)->SetTitle(str);
-		CommonData->hAmpE[mod]->ProjectionY("_py", chan + 1, chan + 1)->Draw();
+		Run.hAmpE[mod]->ProjectionY("_py", chan + 1, chan + 1)->SetTitle(str);
+		Run.hAmpE[mod]->ProjectionY("_py", chan + 1, chan + 1)->Draw();
 	}
    	fCanvas->Update();
 
@@ -656,23 +517,23 @@ void dshowMainFrame::DoDraw(void)
    	fCanvas->cd(1);
 	if (rTimeAll->IsOn()) {
 		sprintf(str, "Module: %d. Time distribution for all channels.", mod + 1);
-		CommonData->hTimeA[mod]->ProjectionY()->SetTitle(str);
-		CommonData->hTimeA[mod]->ProjectionY()->Draw();
-		CommonData->hTimeB[mod]->ProjectionY()->Draw("same");
+		Run.hTimeA[mod]->ProjectionY()->SetTitle(str);
+		Run.hTimeA[mod]->ProjectionY()->Draw();
+		Run.hTimeB[mod]->ProjectionY()->Draw("same");
 	} else if (rTimeSingle->IsOn()) {
 		sprintf(str, "Module: %d. Time distribution for channel %d.", mod + 1, chan);
-		CommonData->hTimeA[mod]->ProjectionY("_py", chan + 1, chan + 1)->SetTitle(str);
-		CommonData->hTimeA[mod]->ProjectionY("_py", chan + 1, chan + 1)->Draw();
-		CommonData->hTimeB[mod]->ProjectionY("_py", chan + 1, chan + 1)->Draw("same");
+		Run.hTimeA[mod]->ProjectionY("_py", chan + 1, chan + 1)->SetTitle(str);
+		Run.hTimeA[mod]->ProjectionY("_py", chan + 1, chan + 1)->Draw();
+		Run.hTimeB[mod]->ProjectionY("_py", chan + 1, chan + 1)->Draw("same");
 	}
 	TimeLegend->Draw();
    	fCanvas->cd(2);
 	if (rTimeAll->IsOn()) {
 		sprintf(str, "Module: %d. Time versus common SiPM time for all channels.", mod + 1);
-		hProj = CommonData->hTimeC[mod]->ProjectionY();
+		hProj = Run.hTimeC[mod]->ProjectionY();
 	} else if (rTimeSingle->IsOn()) {
 		sprintf(str, "Module: %d. Time versus common SiPM time for channel %d.", mod + 1, chan);
-		hProj = CommonData->hTimeC[mod]->ProjectionY("_py", chan + 1, chan + 1);
+		hProj = Run.hTimeC[mod]->ProjectionY("_py", chan + 1, chan + 1);
 	}
 	hProj->SetTitle(str);
 	if (hProj->Integral() > 1.0) {
@@ -684,8 +545,8 @@ void dshowMainFrame::DoDraw(void)
 	if (Map[mod][0].type == TYPE_SIPM) {
 		ln.SetLineColor(kRed);
 		ln.SetLineWidth(2);
-		ln.DrawLine(-CommonData->SiPMWindow, 0, -CommonData->SiPMWindow, h);
-		ln.DrawLine( CommonData->SiPMWindow, 0,  CommonData->SiPMWindow, h);
+		ln.DrawLine(-Conf.SiPMWindow, 0, -Conf.SiPMWindow, h);
+		ln.DrawLine( Conf.SiPMWindow, 0,  Conf.SiPMWindow, h);
 	}
    	fCanvas->Update();
 
@@ -695,93 +556,10 @@ void dshowMainFrame::DoDraw(void)
 	DrawEvent(fCanvas);
    	fCanvas->Update();
 
-/*		Summa				*/
-   	fCanvas = fSummaCanvas->GetCanvas();
-   	fCanvas->cd();
-	fCanvas->Clear();
-	fCanvas->Divide(3, 2);
-//	TH1D *hSiPMsum[2];	// SiPM summa, all/no veto
-   	fCanvas->cd(1);
-	CommonData->hSiPMsum[0]->Draw();
-	CommonData->hSiPMsum[1]->Draw("same");
-//	TH1D *hSiPMhits[2];	// SiPM Hits, all/no veto
-   	fCanvas->cd(2);
-	CommonData->hSiPMhits[0]->Draw();
-	CommonData->hSiPMhits[1]->Draw("same");
-//	TH1D *hPMTsum[2];	// PMT summa, all/no veto
-   	fCanvas->cd(4);
-	CommonData->hPMTsum[0]->Draw();
-	CommonData->hPMTsum[1]->Draw("same");
-//	TH1D *hPMThits[2];	// PMT Hits, all/no veto
-   	fCanvas->cd(5);
-	CommonData->hPMThits[0]->Draw();
-	CommonData->hPMThits[1]->Draw("same");
-//	TH1D *hSPRatio[2];	// SiPM sum to PTMT sum ratio, all/no veto
-   	fCanvas->cd(3);
-	CommonData->hSPRatio[0]->Draw();
-	CommonData->hSPRatio[1]->Draw("same");
-//	TLegend
-	SummaLegend->Draw();	
-//	cuts
-   	fCanvas->cd(6);
-	CommonData->hCuts->Draw();
-   	fCanvas->Update();
-   	
 /*		Rates				*/
    	fCanvas = fRateCanvas->GetCanvas();
    	fCanvas->cd();
 	fCanvas->Clear();
-	for (j=0; j<RATELEN; j++) CommonData->hRate->SetBinContent(j+1, CommonData->fRate[(CommonData->iRatePos + j) % RATELEN]);
-   	if (CommonData->hRate->Integral() > 1) {
-		CommonData->hRate->Fit("pol0", "Q", "p");
-		sprintf(str, "%6.1f Hz", CommonData->hRate->GetFunction("pol0")->GetParameter(0));
-		txt.DrawTextNDC(0.75, 0.91, str);
-	} else {
-		CommonData->hRate->Draw("p");
-	}
-   	fCanvas->Update();
-
-/*		Tagged events			*/
-   	fCanvas = fTagCanvas->GetCanvas();
-   	fCanvas->cd();
-	fCanvas->Clear();
-	fCanvas->Divide(3, 2);
-	for (i=0; i<2; i++) {
-	   	fCanvas->cd(3 * i + 1);
-		CommonData->hTagEnergy[i]->Draw();
-	   	fCanvas->cd(3 * i + 2);
-		CommonData->hTagXY[i]->Draw("color");
-	   	fCanvas->cd(3 * i + 3);
-		CommonData->hTagZ[i]->Draw();
-	}
-   	fCanvas->Update();
-
-/*		Neutrino events			*/
-   	fCanvas = fNeutrinoCanvas->GetCanvas();
-   	fCanvas->cd();
-	fCanvas->Clear();
-	fCanvas->Divide(2,2);
-	fCanvas->cd(1);
-	CommonData->hNeutrinoEnergy[0]->Draw();
-	fCanvas->cd(2);
-	CommonData->hNeutrinoEnergy[1]->Draw();
-	fCanvas->cd(3);
-	CommonData->hCaptureTime->Draw();
-	fCanvas->cd(4);
-	CommonData->hNeutronPath->Draw();
-   	fCanvas->Update();
-
-/*		Mesoatom events			*/
-   	fCanvas = fMuonCanvas->GetCanvas();
-   	fCanvas->cd();
-	fCanvas->Clear();
-	fCanvas->Divide(2, 2);
-	for (i=0; i<2; i++) {
-	   	fCanvas->cd(2 * i + 1);
-		CommonData->hMesoEnergy[i]->Draw();
-	   	fCanvas->cd(2* i + 2);
-		CommonData->hMesoTime[i]->Draw();
-	}
    	fCanvas->Update();
 
 	TThread::UnLock();
@@ -835,7 +613,7 @@ void dshowMainFrame::DrawEvent(TCanvas *cv)
 	const char *tagname[] = {"VETO ", "POSITRON ", "NEUTRON "};
 	char str[64];
 
-	if (!CommonData->EventHits) return;
+	if (!Run.DisplayEvent || !Run.DisplayEvent->NHits) return;
 //		Draw DANSS	
 	cv->Clear();
 	SipmBox.SetLineColor(kGray);
@@ -854,28 +632,28 @@ void dshowMainFrame::DrawEvent(TCanvas *cv)
 	thPMT = nPMTThreshold->GetIntNumber();
 	thSiPM = nSiPMThreshold->GetIntNumber();
 	PmtBox.SetLineWidth(5);
-	for (n=0; n<CommonData->EventHits; n++) if (CommonData->Event[n].type == TYPE_PMT && CommonData->Event[n].amp > thPMT) {
-		i = CommonData->Event[n].xy;
-		j = CommonData->Event[n].z / 2;
-		k = CommonData->Event[n].z & 1;
+	for (n=0; n<Run.DisplayEvent->NHits; n++) if (Run.DisplayEvent->hits[n].type == TYPE_PMT && Run.DisplayEvent->hits[n].energy > thPMT && Run.DisplayEvent->hits[n].flag >= 0) {
+		i = Run.DisplayEvent->hits[n].xy;
+		j = Run.DisplayEvent->hits[n].z / 2;
+		k = Run.DisplayEvent->hits[n].z & 1;
 		if (!k) i = 4 - i;
-		PmtBox.SetLineColor(PaletteStart + CommonData->Event[n].amp*MAXRGB/MAXADC);
+		PmtBox.SetLineColor(PaletteStart + Run.DisplayEvent->hits[n].energy*MAXRGB/MAXADC);
 		PmtBox.DrawBox(0.05 + 0.5*k + 0.08*i, 0.1 + 0.16*j, 0.13 + 0.5*k + 0.08*i, 0.26 +0.16*j);
 	}
 //		Draw Hits in SiPM
 	SipmBox.SetFillStyle(1000);
-	for (n=0; n<CommonData->EventHits; n++) if (CommonData->Event[n].type == TYPE_SIPM && CommonData->Event[n].amp > thSiPM) {
-		i = CommonData->Event[n].xy;
-		j = CommonData->Event[n].z / 2;
-		k = CommonData->Event[n].z & 1;
+	for (n=0; n<Run.DisplayEvent->NHits; n++) if (Run.DisplayEvent->hits[n].type == TYPE_SIPM && Run.DisplayEvent->hits[n].energy > thSiPM) {
+		i = Run.DisplayEvent->hits[n].xy;
+		j = Run.DisplayEvent->hits[n].z / 2;
+		k = Run.DisplayEvent->hits[n].z & 1;
 		if (!k) i = 24 - i;
-		SipmBox.SetFillColor(PaletteStart + CommonData->Event[n].amp*MAXRGB/MAXADC);
+		SipmBox.SetFillColor(PaletteStart + Run.DisplayEvent->hits[n].energy*MAXRGB/MAXADC);
 		SipmBox.DrawBox(0.05 + 0.5*k + 0.016*i, 0.1 + 0.008*k + 0.016*j, 0.066 + 0.5*k + 0.016*i, 0.108 + 0.008*k + 0.016*j);
 	}
 //		Draw Hits in VETO
-	for (n=0; n<CommonData->EventHits; n++) if (CommonData->Event[n].type == TYPE_VETO && CommonData->Event[n].amp > thPMT) {
-		SipmBox.SetFillColor(PaletteStart + CommonData->Event[n].amp*MAXRGB/MAXADC);
-		i = CommonData->Event[n].xy;
+	for (n=0; n<Run.DisplayEvent->NHits; n++) if (Run.DisplayEvent->hits[n].type == TYPE_VETO && Run.DisplayEvent->hits[n].energy > thPMT) {
+		SipmBox.SetFillColor(PaletteStart + Run.DisplayEvent->hits[n].energy*MAXRGB/MAXADC);
+		i = Run.DisplayEvent->hits[n].xy;
 		if (vpos[i].x1 < 0) continue;
 		SipmBox.DrawBox(vpos[i].x1, vpos[i].y1, vpos[i].x2, vpos[i].y2);
 	}
@@ -888,10 +666,10 @@ void dshowMainFrame::DrawEvent(TCanvas *cv)
 	ax.DrawAxis(0.05, 0.05, 0.95, 0.05, 0.0, (double) MAXADC);
 //		Draw TAG
 	str[0] = '\0';
-	for (i=0; i<sizeof(tagname) / sizeof(tagname[0]); i++) if (CommonData->EventFlags & (1 << i)) strcat(str, tagname[i]);
+	for (i=0; i<sizeof(tagname) / sizeof(tagname[0]); i++) if (Run.DisplayEvent->Flags & (1 << i)) strcat(str, tagname[i]);
 	txt.DrawText(0.2, 0.95, str);
 
-	CommonData->EventHits = 0;
+	Run.DisplayEvent->NHits = 0;
 }
 
 /*	show file open dialog and start thread to play to play selected data file(s)	*/
@@ -902,8 +680,8 @@ void dshowMainFrame::PlayFileDialog(void)
 	new TGFileDialog(gClient->GetRoot(), this, kFDOpen, PlayFile);
 
 	if (PlayFile->fFileNamesList && PlayFile->fFileNamesList->First()) {
-		CommonData->iStop = 0;
-		DataThread = new TThread("DataThread", DataThreadFunction, (void *) this);
+		Run.iStop = 0;
+		DataThread = new TThread("DataThread", DataThreadFunction, (void *) PlayFile);
 		DataThread->Run();
 	}
 }
@@ -932,31 +710,14 @@ void dshowMainFrame::SaveDialog(void)
 		TThread::Lock();
 		if (!strcmp(name_end, "root")) {
 			f = new TFile(SaveFile->fFilename, "RECREATE");
-			if (CommonData->hWaveForm) CommonData->hWaveForm->Write();	// Waveform to show
+			if (Run.hWaveForm) Run.hWaveForm->Write();	// Waveform to show
 			for (i=0; i<MAXWFD; i++) {
-				CommonData->hAmpS[i]->Write();	// amplitude versus channel - self trigger
-				CommonData->hAmpE[i]->Write();	// amplitude versus channel - events
-				CommonData->hTimeA[i]->Write();	// time versus channel - events, no threshold
-				CommonData->hTimeB[i]->Write();	// time versus channel - events, with fixed threshold
-				CommonData->hTimeC[i]->Write();	// channel time - common SiPM time, TimeB thresholds
+				Run.hAmpS[i]->Write();	// amplitude versus channel - self trigger
+				Run.hAmpE[i]->Write();	// amplitude versus channel - events
+				Run.hTimeA[i]->Write();	// time versus channel - events, no threshold
+				Run.hTimeB[i]->Write();	// time versus channel - events, with fixed threshold
+				Run.hTimeC[i]->Write();	// channel time - common SiPM time, TimeB thresholds
 			}
-			for(i=0; i<2; i++) {
-				CommonData->hSiPMsum[i]->Write();	// SiPM summa, all/no veto
-				CommonData->hSiPMhits[i]->Write();	// SiPM Hits, all/no veto
-				CommonData->hPMTsum[i]->Write();	// PMT summa, all/no veto
-				CommonData->hPMThits[i]->Write();	// PMT Hits, all/no veto
-				CommonData->hSPRatio[i]->Write();	// SiPM sum to PTMT sum ratio, all/no veto
-				CommonData->hTagEnergy[i]->Write();	// Computed enegry for tagged events
-				CommonData->hTagXY[i]->Write();	// XY-distribution for tagged events
-				CommonData->hTagZ[i]->Write();	// Z-distribution for tagged events
-				CommonData->hNeutrinoEnergy[i]->Write();	// Selected events positron and neutron energy
-				CommonData->hMesoEnergy[i]->Write();	// Selected meso-events positron and neutron energy
-				CommonData->hMesoTime[i]->Write();	// Meso-events meso-decay and neutron capture time
-			}
-			CommonData->hCaptureTime->Write();	// Neutron decay time
-			CommonData->hNeutronPath->Write();	// distance from positron to neutron
-			CommonData->hCuts->Write();		// Cut criteria
-			CommonData->hRate->Write();		// Rate
 			f->Close();
 			delete f;
 		} else if (!strcmp(name_end, "ps") || !strcmp(name_end, "pdf")) {
@@ -968,13 +729,9 @@ void dshowMainFrame::SaveDialog(void)
 			fSpectrumCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
 			fTimeCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
 			fEventCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
-			fSummaCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
 			fRateCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
-			fTagCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
-			fNeutrinoCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
-			fMuonCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
 			sprintf(str, "%s]", SaveFile->fFilename);
-			fMuonCanvas->GetCanvas()->Print(str, (Option_t *)name_end);			
+			fRateCanvas->GetCanvas()->Print(str, (Option_t *)name_end);			
 		} else {
 			sprintf(str, "%s.wave.%s", name_beg, name_end);
 			fWaveCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
@@ -986,16 +743,8 @@ void dshowMainFrame::SaveDialog(void)
 			fTimeCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
 			sprintf(str, "%s.event.%s", name_beg, name_end);
 			fEventCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
-			sprintf(str, "%s.sum.%s", name_beg, name_end);
-			fSummaCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
 			sprintf(str, "%s.rate.%s", name_beg, name_end);
 			fRateCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
-			sprintf(str, "%s.tag.%s", name_beg, name_end);
-			fTagCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
-			sprintf(str, "%s.neut.%s", name_beg, name_end);
-			fNeutrinoCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
-			sprintf(str, "%s.muon.%s", name_beg, name_end);
-			fMuonCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
 		}
 		free(name_beg);
 		TThread::UnLock();
@@ -1004,7 +753,7 @@ void dshowMainFrame::SaveDialog(void)
 
 void dshowMainFrame::PlayFileStop(void)
 {
-	CommonData->iStop = 1;
+	Run.iStop = 1;
 	PlayProgress->SetPosition(0.0);
 	if (DataThread) DataThread->Join();
 	DataThread = NULL;
@@ -1013,429 +762,17 @@ void dshowMainFrame::PlayFileStop(void)
 void dshowMainFrame::SaveEvent(void)
 {
 	char str[1024];
-	sprintf(str, "%s/event_%d.jpg", SaveFile->fIniDir, CommonData->thisEventCnt);
+	sprintf(str, "%s/event_%d.jpg", SaveFile->fIniDir, Run.thisEventCnt);
 	fEventCanvas->GetCanvas()->Print(str);	
 }
 
 void dshowMainFrame::SaveWaveForm(void)
 {
 	char str[1024];
-	sprintf(str, "%s/wave_%d.jpg", SaveFile->fIniDir, CommonData->thisWaveFormCnt);
+	sprintf(str, "%s/wave_%d.jpg", SaveFile->fIniDir, Run.thisWaveFormCnt);
 	fWaveCanvas->GetCanvas()->Print(str);	
 }
 
-/*	Process an event					*/
-void dshowMainFrame::ProcessEvent(char *data)
-{
-	struct hw_rec_struct *rec;
-	struct rec_header_struct *head;
-	int i, iptr, len;
-	int amp;
-	float t, at;
-	int nat;
-	char strl[1024];
-	int mod, chan;
-	int evt_len;
-	void *ptr;
-	int sumPMT, sumSiPM, sumSiPMc;
-	int nSiPM, nSiPMc, nPMT;
-	long long gTime;
-	int gTrig;
-	int nHits;
-	int cHits;
-	float dtM, dtN, dr, drZ;
-	int PMTmask[2][5][5];
-
-	sumPMT = 0;
-	sumSiPM = 0;
-	nSiPM = 0;
-	sumSiPMc = 0;
-	nSiPMc = 0;
-	nPMT = 0;
-	gTime = -1;
-	nHits = 0;
-	cHits = 0;
-
-	head = (struct rec_header_struct *)data;
-	for (iptr = sizeof(struct rec_header_struct); iptr < head->len; iptr += len) {		// record by record
-		rec = (struct hw_rec_struct *) &data[iptr];
-		len = (rec->len + 1) * sizeof(short);
-
-		if (iptr + len > head->len) {
-			Log("Unexpected end of event: iptr = %d, len = %d, total len = %d.\n", iptr, len, head->len);
-			CommonData->ErrorCnt++;
-			return;
-		}
-		if (rec->module < 1 || rec->module > MAXWFD) {
-			Log("Module %d is out of range.\n", rec->module);
-			CommonData->ErrorCnt++;
-			continue;
-		}
-		mod = rec->module;
-		chan = rec->chan;
-		switch(rec->type) {
-		case TYPE_MASTER:
-			for (i = 0; i < rec->len - 2; i++) if (rec->d[i+1] & 0x4000) rec->d[i+1] |= 0x8000;		// do waveform data sign extension
-			amp = FindMaxofShort(&rec->d[1], rec->len - 2);							// Amplitude
-			t = NSPERCHAN * (FindHalfTime(&rec->d[1], rec->len - 2, amp) - rec->d[0] / 6.0);		// Time
-//			Extract Waveform for drawing
-			if (!CommonData->hWaveForm && rWaveTrig->IsOn() && nWFD->GetIntNumber() == mod && nChan->GetIntNumber() == chan 
-				&& amp > nWaveThreshold->GetIntNumber()) {
-				sprintf(strl, "Event WaveForm for %d.%2.2d", mod, chan);
-				CommonData->hWaveForm = new TH1D("hWave", strl, rec->len - 2, 0, NSPERCHAN * (rec->len - 2));
-				CommonData->hWaveForm->SetStats(0);
-				for (i = 0; i < rec->len - 2; i++) CommonData->hWaveForm->SetBinContent(i + 1, (double) rec->d[i+1]);
-				CommonData->thisWaveFormCnt = CommonData->EventCnt;
-			}
-//			Fill histogramms
-			CommonData->hAmpE[mod-1]->Fill((double)chan, (double)amp);
-			CommonData->hTimeA[mod-1]->Fill((double)chan, t);
-			if (amp > CommonData->TimeBThreshold) CommonData->hTimeB[mod-1]->Fill((double)chan, t);
-//			Add hit to event structure
-			if (Map[mod-1][chan].type >= 0) {
-				if (nHits >= EventLength) {
-					ptr = realloc(Event, (EventLength + 1024) * sizeof(struct evt_disp_struct));
-					if (!ptr) break;
-					Event = (struct evt_disp_struct *)ptr;
-					EventLength += 1024;
-				}
-				Event[nHits].mod = mod;
-				Event[nHits].chan = chan;
-				Event[nHits].amp = amp;
-				Event[nHits].time = t;
-				Event[nHits].type = Map[mod-1][chan].type;
-				Event[nHits].xy = Map[mod-1][chan].xy;
-				Event[nHits].z = Map[mod-1][chan].z;
-				nHits++;
-			}
-			break;
-		case TYPE_RAW:
-			amp = FindMaxofShort(&rec->d[1], rec->len - 2);
-//			Extract Waveform for drawing
-			if (!CommonData->hWaveForm && rWaveTrig->IsOn() && nWFD->GetIntNumber() == mod && nChan->GetIntNumber() == chan
-				&& amp > nWaveThreshold->GetIntNumber()) {
-				sprintf(strl, "Event WaveForm for %d.%2.2d", mod, chan);
-				CommonData->hWaveForm = new TH1D("hWave", strl, rec->len - 2, 0, NSPERCHAN * (rec->len - 2));
-				CommonData->hWaveForm->SetStats(0);
-				for (i = 0; i < rec->len - 2; i++) CommonData->hWaveForm->SetBinContent(i + 1, (double) rec->d[i+1]);
-			}
-			break;
-		case TYPE_SUM:
-			for (i = 0; i < rec->len - 2; i++) if (rec->d[i+1] & 0x4000) rec->d[i+1] |= 0x8000;		// do waveform data sign extension
-			amp = FindMaxofShort(&rec->d[1], rec->len - 2);
-//			Extract Waveform for drawing
-			if (!CommonData->hWaveForm && rWaveHist->IsOn() && nWFD->GetIntNumber() == mod && nChan->GetIntNumber() == chan
-				&& amp > nWaveThreshold->GetIntNumber()) {
-				sprintf(strl, "Event WaveForm for %d.%2.2d", mod, chan);
-				CommonData->hWaveForm = new TH1D("hWave", strl, rec->len - 2, 0, NSPERCHAN * (rec->len - 2));
-				CommonData->hWaveForm->SetStats(0);
-				for (i = 0; i < rec->len - 2; i++) CommonData->hWaveForm->SetBinContent(i + 1, (double) rec->d[i+1]);
-			}
-			break;
-		case TYPE_TRIG:
-			gTime = rec->d[1] + (((long long) rec->d[2]) << 15) + (((long long) rec->d[3]) << 30);
-			gTrig = rec->d[4] + (((int) rec->d[5]) << 15);
-			break;
-		}
-	}
-	if (gTime < 0) {
-		Log("Trigger record (type = 2) was not found.\n");
-		CommonData->ErrorCnt++;
-		return;
-	}
-//	check if a second passed
-	if (CommonData->gLastTime < 0) {
-		CommonData->gLastTime = gTime;
-		CommonData->gTime = gTime;
-		CommonData->gTrig = gTrig;
-	} else if (gTime - CommonData->gLastTime >= RATEPER * ONESECOND) {
-		CommonData->fRate[CommonData->iRatePos] = ((float) ONESECOND) * (gTrig - CommonData->gTrig) / (gTime - CommonData->gTime);
-		CommonData->iRatePos = (CommonData->iRatePos + 1) % RATELEN;
-		CommonData->gLastTime += RATEPER * ONESECOND;
-		CommonData->gTime = gTime;
-		CommonData->gTrig = gTrig;
-	}
-//
-//		TimeC
-	nat = 0;
-	at = 0;
-	for (i = 0; i<nHits; i++) if (Event[i].amp > CommonData->TimeBThreshold && Event[i].type == TYPE_SIPM) {
-		at += Event[i].time;
-		nat++;
-	}
-	if (nat) {
-		at /= nat;
-		if (nat > 1) for (i = 0; i<nHits; i++) if (Event[i].amp > CommonData->TimeBThreshold) CommonData->hTimeC[Event[i].mod - 1]->Fill((double) Event[i].chan, Event[i].time - at);
-	} else {
-		CommonData->hCuts->Fill(CUT_NOSITIME);
-	}
-//		Create PMTmask
-	memset(PMTmask, 0, sizeof(PMTmask));
-	for (i=0; i<nHits; i++) if (Event[i].type == TYPE_PMT && Event[i].xy >= 0) PMTmask[Event[i].z & 1][Event[i].z/2][Event[i].xy] = 1;
-//		Clean the event
-	if (CleanLength < EventLength) {
-		ptr = realloc(CleanEvent, EventLength * sizeof(struct evt_disp_struct));
-		if (!ptr) return;
-		CleanEvent = (struct evt_disp_struct *) ptr;
-		CleanLength = EventLength;
-	}
-	for (i=0; i<nHits; i++) {
-		if (Event[i].xy < 0) continue;											// unknown position
-		if (Event[i].type == TYPE_SIPM && ((!nat) || fabs(Event[i].time - at) > CommonData->SiPMWindow)) continue;	// time window
-		if (Event[i].type == TYPE_SIPM && Event[i].amp < CommonData->TimeBThreshold && (!PMTmask[Event[i].z & 1][Event[i].z/20][Event[i].xy/5])) continue;	// support in PMT for small amplitudes
-		memcpy(&CleanEvent[cHits], &Event[i], sizeof(struct evt_disp_struct));
-		cHits++;
-	}
-	CalculateTags(cHits);
-	EventStuck[EventStuckPos].gTime = gTime;
-	for (i=0; i<cHits; i++) {
-		switch (CleanEvent[i].type) {
-		case TYPE_SIPM:
-			sumSiPM += CleanEvent[i].amp;
-			nSiPM++;
-			if (CleanEvent[i].amp > CommonData->SummaSiPMThreshold) {
-				sumSiPMc += CleanEvent[i].amp;
-				nSiPMc++;					
-			}
-			break;
-		case TYPE_PMT:
-			sumPMT += CleanEvent[i].amp;
-			nPMT++;
-			break;
-		}
-	}
-//	TH1D *hSiPMsum[2];	// SiPM summa, all/no veto
-	CommonData->hSiPMsum[0]->Fill(sumSiPMc / SIPM2MEV);
-//	TH1D *hSiPMhits[2];	// SiPM Hits, all/no veto
-	CommonData->hSiPMhits[0]->Fill(1.0*nSiPMc);
-//	TH1D *hPMTsum[2];	// PMT summa, all/no veto
-	CommonData->hPMTsum[0]->Fill(sumPMT / PMT2MEV);
-//	TH1D *hPMThits[2];	// PMT Hits, all/no veto
-	CommonData->hPMThits[0]->Fill(1.0*nPMT);
-//	TH1D *hSPRatio[2];	// SiPM sum to PTMT sum ratio, all/no veto
-	if (sumPMT > 0) CommonData->hSPRatio[0]->Fill(sumSiPMc * PMT2MEV / (sumPMT * SIPM2MEV));
-	if (!(EventFlags & FLAG_VETO)) {
-//	TH1D *hSiPMsum[2];	// SiPM summa, all/no veto
-		CommonData->hSiPMsum[1]->Fill(sumSiPMc / SIPM2MEV);
-//	TH1D *hSiPMhits[2];	// SiPM Hits, all/no veto
-		CommonData->hSiPMhits[1]->Fill(1.0*nSiPMc);
-//	TH1D *hPMTsum[2];	// PMT summa, all/no veto
-		CommonData->hPMTsum[1]->Fill(sumPMT / PMT2MEV);
-//	TH1D *hPMThits[2];	// PMT Hits, all/no veto
-		CommonData->hPMThits[1]->Fill(1.0*nPMT);
-//	TH1D *hSPRatio[2];	// SiPM sum to PTMT sum ratio, all/no veto
-		if (sumPMT > 0) CommonData->hSPRatio[1]->Fill(sumSiPMc * PMT2MEV / (sumPMT * SIPM2MEV));
-	}
-//		Copy event for drawing
-	if ((!CommonData->EventHits) && sumPMT >= nPMTSumThreshold->GetIntNumber() && sumSiPM >= nSiPMSumThreshold->GetIntNumber() && 
-		(rEvtAll->IsOn() || (rEvtNone->IsOn() && !EventFlags) || (rEvtVeto->IsOn() && (EventFlags & FLAG_VETO)) 
-		|| (rEvtPositron->IsOn() && (EventFlags & FLAG_POSITRON)) || (rEvtNeutron->IsOn() && (EventFlags & FLAG_NEUTRON)))) {
-		if (cHits > CommonData->EventLength) {
-			ptr = realloc(CommonData->Event, cHits * sizeof(struct evt_disp_struct));
-			if (ptr) {
-				CommonData->Event = (struct evt_disp_struct *) ptr;
-				memcpy(CommonData->Event, CleanEvent, cHits * sizeof(struct evt_disp_struct));
-				CommonData->EventLength = cHits;
-				CommonData->EventHits = cHits;
-			}
-		} else {
-			memcpy(CommonData->Event, CleanEvent, cHits * sizeof(struct evt_disp_struct));
-			CommonData->EventHits = cHits;
-		}
-		CommonData->EventFlags = EventFlags;
-		CommonData->EventEnergy = EventEnergy;
-		CommonData->thisEventCnt = CommonData->EventCnt;
-	}
-}
-
-/*	Check event for veto/positron/neutron signature		*/
-void dshowMainFrame::CalculateTags(int cHits)
-{
-	float xsum, exsum, ysum, eysum, zsum;
-	int nx, ny;
-	int ncHits;
-	float eall, eclust, r2, xy0;
-	float E;
-	int i, j;
-	int nVeto;
-	float sumVeto;
-	int newhits;
-
-	eall = 0;
-	for (i=0; i<cHits; i++) if (CleanEvent[i].type == TYPE_SIPM) eall += CleanEvent[i].amp;
-	eall /= SIPM2MEV;
-
-	EventFlags = 0;
-	EventEnergy = eall;
-
-//	VETO
-	nVeto = 0;
-	sumVeto  = 0;
-	for (i=0; i<cHits; i++) if (CleanEvent[i].type == TYPE_VETO) {
-		sumVeto += CleanEvent[i].amp;
-		nVeto++;
-	}
-	
-	if (nVeto > 1 || sumVeto > VETOMIN || EventEnergy > DVETOMIN) {
-		EventFlags |= FLAG_VETO;
-		// don't fill vertex
-		CommonData->hCuts->Fill(CUT_VETO);
-	}
-//	Check for neutron
-//		Calculate parameters
-//		"Gamma" center
-	xsum = ysum = zsum = 0;
-	nx = ny = 0;
-	
-	for (i=0; i<cHits; i++) if (CleanEvent[i].type == TYPE_SIPM) {
-		if (CleanEvent[i].z & 1) {	// X
-			nx++;
-			xsum += CleanEvent[i].xy;
-		} else {			// Y
-			ny++;
-			ysum += CleanEvent[i].xy;
-		}
-		zsum += CleanEvent[i].z;
-	}
-	if (nx) {
-		xsum *= WIDTH/nx;
-	} else {
-		xsum = -1;
-		CommonData->hCuts->Fill(CUT_NONX);
-	}
-	if (ny) {
-		ysum *= WIDTH/ny;
-	} else {
-		ysum = -1;
-		CommonData->hCuts->Fill(CUT_NONY);
-	}
-	if (nx + ny) {
-		zsum *= THICK/(nx + ny);
-	} else {
-		zsum = -1;
-		CommonData->hCuts->Fill(CUT_NONZ);
-	}
-	EventStuck[EventStuckPos].VertexN[0] = xsum;
-	EventStuck[EventStuckPos].VertexN[1] = ysum;
-	EventStuck[EventStuckPos].VertexN[2] = zsum;
-
-//		Count clusters and neutron energy
-	ncHits = nx + ny;
-//		Implement criteria
-	if (ncHits >= Pars.nMin && EventEnergy > Pars.eNMin && EventEnergy < Pars.eNMax) {
-		EventFlags |= FLAG_NEUTRON; 
-		CommonData->hTagEnergy[1]->Fill(EventEnergy);
-		CommonData->hTagXY[1]->Fill(xsum, ysum);
-		CommonData->hTagZ[1]->Fill(zsum);
-		CommonData->hCuts->Fill(CUT_NEUTRON);
-	}
-	if (ncHits < Pars.nMin) CommonData->hCuts->Fill(CUT_NMULT);
-	if (eclust <= Pars.eNMin || eclust >= Pars.eNMax) CommonData->hCuts->Fill(CUT_NENERGY);
-	
-//		Check for pisitron
-//		Find consequtive cluster near EMAX strip
-//		find EMAX hit
-	E = 0;
-	j = 0;
-	eclust = 0;
-	xsum = ysum = zsum = 0;
-	exsum = eysum = 0;
-	for (i=0; i<cHits; i++) if (CleanEvent[i].type == TYPE_SIPM) if (CleanEvent[i].amp > E) {
-		E = CleanEvent[i].amp;
-		j = i;
-	}
-	if (E > 0) {
-//		Add EMAX hit to the sum
-		CleanEvent[j].in = 1;
-		ncHits = 1;
-		eclust = CleanEvent[j].amp;
-		if (CleanEvent[j].z & 1) {	// X
-			exsum = CleanEvent[j].amp;
-			xsum = CleanEvent[j].amp * CleanEvent[j].xy;
-		} else {			// Y
-			eysum = CleanEvent[j].amp;
-			ysum = CleanEvent[j].amp * CleanEvent[j].xy;
-		}
-		zsum = CleanEvent[j].amp * CleanEvent[j].z;
-//		Look for neighbors
-		for (;;) {
-			newhits = 0;
-			for (i=0; i<cHits; i++) for (j=0; j<cHits; j++) if (CleanEvent[i].type == TYPE_SIPM && CleanEvent[j].in && !CleanEvent[i].in && neighbors(CleanEvent[i].xy, CleanEvent[j].xy, CleanEvent[i].z, CleanEvent[j].z)) {
-				if (CleanEvent[i].z & 1) {	// X
-					exsum += CleanEvent[i].amp;
-					xsum += CleanEvent[i].amp * CleanEvent[i].xy;
-				} else {			// Y
-					eysum += CleanEvent[i].amp;
-					ysum += CleanEvent[i].amp * CleanEvent[i].xy;
-				}
-				zsum += CleanEvent[i].amp * CleanEvent[i].z;
-				ncHits++;
-				eclust += CleanEvent[i].amp;
-				newhits++;
-				CleanEvent[i].in = 1;
-			}
-			if (!newhits) break;
-		}
-	}
-	eclust /= SIPM2MEV;
-	if (exsum > 0) {
-		xsum *= WIDTH/exsum;
-	} else {
-		xsum = -1;
-	}
-	if (eysum > 0) {
-		ysum *= WIDTH/eysum;
-	} else {
-		ysum = -1;
-	}
-	if (exsum + eysum > 0) {
-		zsum *= THICK/(exsum + eysum);
-	} else {
-		zsum = -1;
-	}
-	ClusterEnergy = eclust;
-	EventStuck[EventStuckPos].VertexP[0] = xsum;
-	EventStuck[EventStuckPos].VertexP[1] = ysum;
-	EventStuck[EventStuckPos].VertexP[2] = zsum;
-	
-//		Implement criteria
-	if (ncHits <= Pars.nClustMax && eclust > Pars.ePosMin && eclust < Pars.ePosMax && EventEnergy - eclust < Pars.eGammaMax) {
-		EventFlags |= FLAG_POSITRON;
-		EventEnergy = eclust;
-		CommonData->hTagEnergy[0]->Fill(ClusterEnergy);
-		CommonData->hTagXY[0]->Fill(xsum, ysum);
-		CommonData->hTagZ[0]->Fill(zsum);
-		CommonData->hCuts->Fill(CUT_POSITRON);
-	}
-	if (ncHits > Pars.nClustMax) CommonData->hCuts->Fill(CUT_PMULT);
-	if (eclust <= Pars.ePosMin || eclust >= Pars.ePosMax) CommonData->hCuts->Fill(CUT_PENERGY);
-	if (EventEnergy - eclust >= Pars.eGammaMax) CommonData->hCuts->Fill(CUT_PFRACTION);
-	CommonData->hCuts->Fill(CUT_NONE);
-
-	EventStuck[EventStuckPos].Energy = EventEnergy;
-	EventStuck[EventStuckPos].ClusterEnergy = ClusterEnergy;
-	EventStuck[EventStuckPos].Flags = EventFlags;
-}
-
-/*	Process SelfTrigger					*/
-void dshowMainFrame::ProcessSelfTrig(int mod, int chan, struct hw_rec_struct_self *data)
-{
-	int i, amp;
-	char strl[1024];
-
-//	Extend sign
-	for (i = 0; i < data->len - 2; i++) if (data->d[i] & 0x4000) data->d[i] |= 0x8000;
-	amp = FindMaxofShort(data->d, data->len - 2);
-//	Graph
-	if (!CommonData->hWaveForm && rWaveSelf->IsOn() && nWFD->GetIntNumber() == mod && nChan->GetIntNumber() == chan &&
-		amp > nWaveThreshold->GetIntNumber()) {
-		sprintf(strl, "Self WaveForm for %d.%2.2d", mod, chan);
-		CommonData->hWaveForm = new TH1D("hWave", strl, data->len - 2, 0, NSPERCHAN * (data->len - 2));
-		for (i = 0; i < data->len - 2; i++) CommonData->hWaveForm->SetBinContent(i + 1, (double) data->d[i]);
-	}
-//	WFD->MAX(Chan) (self)
-	CommonData->hAmpS[mod-1]->Fill((double)chan, (double)amp);
-}
 
 /*	Reset histogramms				*/
 void dshowMainFrame::Reset(void)
@@ -1443,10 +780,6 @@ void dshowMainFrame::Reset(void)
 	ResetSelfHists();
 	ResetSpectrumHists();
 	ResetTimeHists();
-	ResetSummaHists();
-	ResetTagHists();
-	ResetNeutrinoHists();
-	ResetMuonHists();
 }
 
 void dshowMainFrame::ResetSelfHists(void)
@@ -1454,7 +787,7 @@ void dshowMainFrame::ResetSelfHists(void)
 	int i;
 
 	TThread::Lock();
-	for (i=0; i<MAXWFD; i++) CommonData->hAmpS[i]->Reset();
+	for (i=0; i<MAXWFD; i++) Run.hAmpS[i]->Reset();
 	TThread::UnLock();
 }
 
@@ -1463,7 +796,7 @@ void dshowMainFrame::ResetSpectrumHists(void)
 	int i;
 
 	TThread::Lock();
-	for (i=0; i<MAXWFD; i++) CommonData->hAmpE[i]->Reset();
+	for (i=0; i<MAXWFD; i++) Run.hAmpE[i]->Reset();
 	TThread::UnLock();
 }
 
@@ -1473,61 +806,9 @@ void dshowMainFrame::ResetTimeHists(void)
 
 	TThread::Lock();
 	for (i=0; i<MAXWFD; i++) {
-		CommonData->hTimeA[i]->Reset();
-		CommonData->hTimeB[i]->Reset();
-		CommonData->hTimeC[i]->Reset();
-	}
-	TThread::UnLock();
-}
-
-void dshowMainFrame::ResetSummaHists(void)
-{
-	int i;
-
-	TThread::Lock();
-	for (i=0; i<2; i++) {
-		CommonData->hSiPMsum[i]->Reset();
-		CommonData->hSiPMhits[i]->Reset();
-		CommonData->hPMTsum[i]->Reset();
-		CommonData->hPMThits[i]->Reset();
-		CommonData->hSPRatio[i]->Reset();
-	}
-	CommonData->hCuts->Reset();
-	TThread::UnLock();
-}
-
-void dshowMainFrame::ResetTagHists(void)
-{
-	int i;
-
-	TThread::Lock();
-	for (i=0; i<2; i++) {
-		CommonData->hTagEnergy[i]->Reset();
-		CommonData->hTagXY[i]->Reset();
-		CommonData->hTagZ[i]->Reset();
-	}
-	TThread::UnLock();
-}
-
-void dshowMainFrame::ResetNeutrinoHists(void)
-{
-	int i;
-
-	TThread::Lock();
-	for (i=0; i<2; i++) CommonData->hNeutrinoEnergy[i]->Reset();
-	CommonData->hCaptureTime->Reset();
-	CommonData->hNeutronPath->Reset();
-	TThread::UnLock();
-}
-
-void dshowMainFrame::ResetMuonHists(void)
-{
-	int i;
-
-	TThread::Lock();
-	for (i=0; i<2; i++) {
-		CommonData->hMesoEnergy[i]->Reset();
-		CommonData->hMesoTime[i]->Reset();
+		Run.hTimeA[i]->Reset();
+		Run.hTimeB[i]->Reset();
+		Run.hTimeC[i]->Reset();
 	}
 	TThread::UnLock();
 }
@@ -1536,26 +817,14 @@ void dshowMainFrame::Connect2Online(void)
 {
 	PlayFileStop();
 	if (Follow->IsDown()) {
-		CommonData->iStop = 0;
-		DataThread = new TThread("DataThread", DataThreadFunction, (void *) this);
+		Run.iStop = 0;
+		DataThread = new TThread("DataThread", DataThreadFunction, NULL);
 		DataThread->Run();
 	}
 }
 
-/*	Change TimeB threshold				*/
-void dshowMainFrame::ChangeTimeBThr(void)
-{
-	CommonData->TimeBThreshold = nTimeBThreshold->GetIntNumber();
-}
 
-/*	Change Summa parameters				*/
-void dshowMainFrame::ChangeSummaPars(void)
-{
-	CommonData->SummaSiPMThreshold = SummaSiPMThreshold->GetIntNumber();
-	CommonData->SiPMWindow = nSiPMWindow->GetNumber();
-}
-
-void dshowMainFrame::ReadConfig(const char *fname)
+int ReadConfig(const char *fname)
 {
 	config_t cnf;
 #ifdef LIBCONFIG_VER_MAJOR
@@ -1575,9 +844,41 @@ void dshowMainFrame::ReadConfig(const char *fname)
 	if (config_read_file(&cnf, fname) != CONFIG_TRUE) {
         	printf("DSHOW: Configuration error in file %s at line %d: %s\n", fname, config_error_line(&cnf), config_error_text(&cnf));
 		config_destroy(&cnf);
-            	return;
+            	return 10;
     	}
-	
+
+//		Parameters
+//	float SiPmCoef;
+	Conf.SiPmCoef = (config_lookup_float(&cnf, "Dshow.SiPmCoef", &dtmp)) ? dtmp : 1/290.0;
+//	float PmtCoef;
+	Conf.PmtCoef = (config_lookup_float(&cnf, "Dshow.PmtCoef", &dtmp)) ? dtmp : 1/105.0;
+//	float VetoMinA;
+	Conf.VetoMinA = (config_lookup_float(&cnf, "Dshow.VetoMinA", &dtmp)) ? dtmp : 300.0;	// veto single hit minimum amplitude
+//	float VetoMinB;
+	Conf.VetoMinB = (config_lookup_float(&cnf, "Dshow.VetoMinB", &dtmp)) ? dtmp : 50.0;	// veto minimum amplitude for number of hits sum
+//	float DVetoMin;
+	Conf.DVetoMin = (config_lookup_float(&cnf, "Dshow.DVetoMin", &dtmp)) ? dtmp : 20.0;	// veto in DANSS, MeV
+//	float SiPmWindow;
+	Conf.SiPmWindow = (config_lookup_float(&cnf, "Dshow.SiPmWindow", &dtmp)) ? dtmp : 20.0;
+//	float NeutronMin;	// Minimum neutron capture energy
+	Conf.NeutronMin = (config_lookup_float(&cnf, "Dshow.NeutronMin", &dtmp)) ? dtmp : 3.0;
+//	float PositronMin;	// Minimum cluster energy
+	Conf.PositronMin = (config_lookup_float(&cnf, "Dshow.PositronMin", &dtmp)) ? dtmp : 1.0;
+//	float NeutronMax;	// Maximum neutron capture energy
+	Conf.NeutronMax = (config_lookup_float(&cnf, "Dshow.NeutronMax", &dtmp)) ? dtmp : 12.0;
+//	float PositronMax;	// Maximum cluster energy
+	Conf.PositronMax = (config_lookup_float(&cnf, "Dshow.PositronMax", &dtmp)) ? dtmp : 12.0;
+//	float MaxOffClusterEnergy;	// Maximum off-cluster energy
+	Conf.MaxOffClusterEnergy = (config_lookup_float(&cnf, "Dshow.MaxOffClusterEnergy", &dtmp)) ? dtmp : 2.0;
+//	int TimeBThreshold;	// amplitude threshold for TimeB histogram
+	Conf.TimeBThreshold = (config_lookup_int(&cnf, "Dshow.TimeBThreshold", &tmp)) ? tmp : 50;
+//	int ServerPort;			// Out port 0xB230
+	Conf.ServerPort = (config_lookup_int(&cnf, "Sink.Port", &tmp)) ? tmp : 0xB230;
+//	char ServerName[128];		// The server host name
+	strncpy(Conf.ServerName, (config_lookup_string(&cnf, "Sink.Name", (const char **) &stmp)) ? stmp : "dserver.danss.local", sizeof(Conf.ServerName));
+
+
+//		DANSS map	
 	for(i=0; i<MAXWFD; i++) { 
 	//	int Type;
 		sprintf(str, "Map.Dev%3.3d.Type", i+1);
@@ -1587,9 +888,13 @@ void dshowMainFrame::ReadConfig(const char *fname)
 		ptr_xy = config_lookup(&cnf, str);
 		sprintf(str, "Map.Dev%3.3d.Z", i+1);
 		ptr_z = config_lookup(&cnf, str);
-		for (j=0; j<64; j++) Map[i][j].type = type;
+		for (j=0; j<64; j++) {
+			Map[i][j].type = type;
+			Map[i][j].T0 = 0;
+		}
 		switch(type) {
 		case TYPE_SIPM:
+			for (j=0; j<64; j++) Map[i][j].Coef = Conf.SiPmCoef;
 			if (!ptr_xy || !ptr_z) break;
 			for (j=0; j<4; j++) {
 				xy = config_setting_get_int_elem(ptr_xy, j);
@@ -1606,6 +911,7 @@ void dshowMainFrame::ReadConfig(const char *fname)
 			}
 			break;
 		case TYPE_PMT:
+			for (j=0; j<64; j++) Map[i][j].Coef = Conf.PmtCoef;
 			if (!ptr_xy || !ptr_z) break;
 			for (j=0; j<64; j++) {
 				Map[i][j].xy = config_setting_get_int_elem(ptr_xy, j);
@@ -1614,6 +920,7 @@ void dshowMainFrame::ReadConfig(const char *fname)
 			break;
 		case TYPE_VETO:
 			for (j=0; j<64; j++) {
+				Map[i][j].Coef = 1;	// we sum amplitude...
 				Map[i][j].xy = j;
 				Map[i][j].z = 0;
 			}			
@@ -1621,368 +928,18 @@ void dshowMainFrame::ReadConfig(const char *fname)
 		}
 	}
 	
-//		Analysis parameters
-//	Positron specific
-//	float ePosMin;
-	Pars.ePosMin = (config_lookup_float(&cnf, "Dshow.ePosMin", &dtmp)) ? dtmp : 1.0;
-//	float ePosMax;
-	Pars.ePosMax = (config_lookup_float(&cnf, "Dshow.ePosMax", &dtmp)) ? dtmp : 8.0;
-//	float eGammaMax;
-	Pars.eGammaMax = (config_lookup_float(&cnf, "Dshow.eGammaMax", &dtmp)) ? dtmp : 1.5;
-//	int nClustMax;
-	Pars.nClustMax = (config_lookup_int(&cnf, "Dshow.nClustMax", &tmp)) ? tmp : 4;
-//	Neutron cuts
-//	float nHitMin;
-	Pars.nHitMin = (config_lookup_float(&cnf, "Dshow.nHitMin", &dtmp)) ? dtmp : 0.4;
-//	int nMin;
-	Pars.nMin = (config_lookup_int(&cnf, "Dshow.nMin", &tmp)) ? tmp : 5;
-//	float eNMin;
-	Pars.eNMin = (config_lookup_float(&cnf, "Dshow.eNMin", &dtmp)) ? dtmp : 3.0;
-//	float eNMax;
-	Pars.eNMax = (config_lookup_float(&cnf, "Dshow.eNMax", &dtmp)) ? dtmp : 10.0;
-//	tNeutronCapture = 50;	// neutron capture time, us
-	Pars.tNeutronCapture = (config_lookup_float(&cnf, "Dshow.tNeutronCapture", &dtmp)) ? dtmp : 50;
-//	NeutronPath = 100;		// Meso atom decay time, us
-	Pars.NeutronPath = (config_lookup_float(&cnf, "Dshow.NeutronPath", &dtmp)) ? dtmp : 100;
-//	NeutronPathZ = 40;		// Meso atom decay time, us
-	Pars.NeutronPathZ = (config_lookup_float(&cnf, "Dshow.NeutronPathZ", &dtmp)) ? dtmp : 100;
-//	int OutPort;			// Out port 0xB230
-	Pars.HostPort = (config_lookup_int(&cnf, "Sink.OutPort", &tmp)) ? tmp : 0xB230;
-//	char MyName[MAXSTR];		// The server host name
-	strncpy(Pars.HostName, (config_lookup_string(&cnf, "Sink.MyName", (const char **) &stmp)) ? stmp : "dserver.danss.local", sizeof(Pars.HostName));
-
 	config_destroy(&cnf);
-}
-
-/*	Return 1 if strips are neighbors.		*/
-int dshowMainFrame::neighbors(int xy1, int xy2, int z1, int z2)
-{
-	if (abs(z1-z2) == 1) return 1;
-	if (z1 == z2 && abs(xy1 - xy2) <= 1) return 1;
 	return 0;
-}
-
-/*	Read one record.						*/
-/*	Return 1 if OK, negative on error, 0 on the EOF.		*/
-int GetFileRecord(char *buf, int buf_size, FILE *f)
-{
-	int irc;
-	int len;
-//		Read length
-	irc = fread(buf, sizeof(int), 1, f);
-	if (irc <= 0) return irc;	// Error or _normal_ EOF
-
-	len = *((int *)buf);
-	if (len < sizeof(int) || len > buf_size) return -2;	// strange length
-
-//		Read the rest
-	irc = fread(&buf[sizeof(int)], len - sizeof(int), 1, f);
-	return irc;	// Error and strange EOF and normal read
-}
-
-/*	Read one record	from TCP stream.				*/
-/*	Return 1 if OK, negative on error.				*/
-/*	Watch for iStop. Return 0 on iStop.				*/
-int GetTCPRecord(char *buf, int buf_size, int fd, int *iStop)
-{
-	int Cnt;
-	int irc;
-	int len;
-	struct timeval tm;
-//		Read length
-	Cnt = 0;
-	while (!(*iStop) && Cnt < sizeof(int)) {
-		irc = read(fd, &buf[Cnt], sizeof(int) - Cnt);
-		if (irc < 0) Log("Read error (irc=%d) %m\n", irc);
-		if (irc < 0 && (errno == EINTR || errno == EAGAIN)) {
-			continue;
-		} else if (irc < 0) {
-			shutdown(fd, 2);
-			return irc;		// Error !!!
-		} else if (irc == 0) {
-			tm.tv_sec = 0;		// do some sleep and try to get more data
-			tm.tv_usec = 100000;
-			select(FD_SETSIZE, NULL, NULL, NULL, &tm);
-		} else {
-			Cnt += irc;
-		}
-	}
-
-	if (*iStop) return 0;
-
-	len = *((int *)buf);
-	if (len < sizeof(int) || len > buf_size) {
-		Log("Strange block length (%d) from TCP. Buf_size = %d\n", len, buf_size);
-		shutdown(fd, 2);
-		return -2;	// strange length
-	}
-
-//		Read the rest
-	while (!(*iStop) && Cnt < len) {
-		irc = read(fd, &buf[Cnt], len - Cnt);
-		if (irc < 0) Log("Read error (irc=%d) %m\n", irc);
-		if (irc < 0 && (errno == EINTR || errno == EAGAIN)) {
-			continue;
-		} else if (irc < 0) {
-			shutdown(fd, 2);
-			return irc;
-		} else if (irc == 0) {
-			tm.tv_sec = 0;		// do some sleep and try to get more data
-			tm.tv_usec = 100000;
-			select(FD_SETSIZE, NULL, NULL, NULL, &tm);			
-		} else {
-			Cnt += irc;
-		}
-	}
-	if (*iStop) return 0;
-	return 1;
-}
-/*	Open data file either directly or via zcat etc, depending on the extension	*/
-/*	Return some large length (12G) on compressed files				*/
-FILE* OpenDataFile(const char *fname, off_t *size) 
-{
-	char cmd[1024];
-	FILE *f;
-
-	*size = 0x300000000LL;
-	if (strstr(fname, ".bz2")) {
-		sprintf(cmd, "bzcat %s", fname);
-		f = popen(cmd, "r");
-	} else if (strstr(fname, ".gz")) {
-		sprintf(cmd, "zcat %s", fname);
-		f = popen(cmd, "r");
-	} else if (strstr(fname, ".xz")) {
-		sprintf(cmd, "xzcat %s", fname);
-		f = popen(cmd, "r");
-	} else {
-		f = fopen(fname, "rb");
-		if (f) {
-			fseek(f, 0, SEEK_END);
-			*size = ftello(f);
-			fseek(f, 0, SEEK_SET);
-		}
-	}
-	return f;
-}
-
-/*	Open TCP connection to dsink							*/
-int OpenTCP(const char *hname, int port) 
-{
-	struct hostent *host;
-	struct sockaddr_in hostname;
-	int fd, flags, irc;
-	
-	host = gethostbyname(hname);
-	if (!host) return -errno;
-	
-	hostname.sin_family = AF_INET;
-	hostname.sin_port = htons(port);
-	hostname.sin_addr = *(struct in_addr *) host->h_addr;
-
-	fd = socket(PF_INET, SOCK_STREAM, 0);
-	if (fd < 0) return -errno;
-	
-	if (connect(fd, (struct sockaddr *)&hostname, sizeof(hostname))) {
-		irc = -errno;
-		close(fd);
-		return irc;
-	}
-	return fd;
-}
-
-/*	Data analysis thread				*/
-void *DataThreadFunction(void *ptr)
-{
-	struct common_data_struct *CommonData;
-	dshowMainFrame *Main;
-	char *buf;
-	struct rec_header_struct *head;
-	int irc;
-	int mod, chan;
-	FILE *fIn;
-	int fdIn;
-	off_t fsize;
-	off_t rsize;
-	int iNum;
-	int Cnt;
-	TObject *f;
-	int FileCnt;
-	int nFiles;
-	char str[256];
-	time_t lastConnect;
-	
-	Main = (dshowMainFrame *)ptr;
-	CommonData = Main->CommonData;
-	CommonData->iError = 0;
-	
-	buf = (char *)malloc(BSIZE);
-	if (!buf) {
-		CommonData->iError = 10;
-		goto Ret;
-	}
-	head = (struct rec_header_struct *) buf;
-	fIn = NULL;
-	fdIn = 0;
-	
-	if (Main->Follow->IsDown()) {
-		fdIn = OpenTCP(Main->Pars.HostName, Main->Pars.HostPort);
-		lastConnect = time(NULL);
-		nFiles = 0;
-		fsize = 0;
-		snprintf(str, sizeof(str), "Online(%s:%d)", Main->Pars.HostName, Main->Pars.HostPort);
-	} else {
-		f = Main->PlayFile->fFileNamesList->First();
-		fIn = OpenDataFile(f->GetName(), &fsize);
-		nFiles = Main->PlayFile->fFileNamesList->GetEntries();
-		snprintf(str, sizeof(str), "%s (%d/%d)", f->GetName(), FileCnt + 1, nFiles);
-	}
-	if (!fIn && fdIn <= 0) {
-		CommonData->iError = 15;
-		if (Main->Follow->IsDown()) Main->Follow->SetState(kButtonUp);
-		goto Ret;
-	}
-	Main->fStatusBar->SetText(str, 5);
-	iNum = Main->nPlayBlocks->GetIntNumber();
-	FileCnt = 0;
-	Main->PlayProgress->SetPosition(0);
-	Main->FileProgress->SetPosition(0);
-	rsize = 0;
-	Cnt = 0;
-	
-	while (!CommonData->iStop) {
-		irc = (Main->Follow->IsDown()) ? GetTCPRecord(buf, BSIZE, fdIn, &CommonData->iStop) : GetFileRecord(buf, BSIZE, fIn);
-		if (irc < 0) {
-			if (Main->Follow->IsDown()) {
-				if (time(NULL) - lastConnect > 30) {	// Try to reconnect
-					sleep(5);
-					fdIn = OpenTCP(Main->Pars.HostName, Main->Pars.HostPort);
-					if (fdIn <= 0) {
-						CommonData->iError = 15;
-						Main->Follow->SetState(kButtonUp);
-						break;
-					}
-					lastConnect = time(NULL);
-					continue;
-				} else {
-					fdIn = irc;
-					Main->Follow->SetState(kButtonUp);
-				}
-			}
-			CommonData->iError = -irc;
-			break;
-		} else if (CommonData->iStop) {
-			break;
-		} else if (irc == 0) {
-			//	check if we have file after
-			FileCnt++;
-			Main->PlayProgress->SetPosition(0);
-			Main->FileProgress->SetPosition(FileCnt * 100.0 / nFiles);
-			if (Main->PlayFile->fFileNamesList->After(f)) {
-				f = Main->PlayFile->fFileNamesList->After(f);
-				snprintf(str, sizeof(str), "%s (%d/%d)", f->GetName(), FileCnt + 1, nFiles);
-				Main->fStatusBar->SetText(str, 5);
-				fclose(fIn);
-				fIn = OpenDataFile(f->GetName(), &fsize);
-				if (!fIn) {
-					CommonData->iError = 25;
-					break;
-				}
-				rsize = 0;
-				Cnt = 0;
-				continue;
-			} else {
-				break;
-			}
-		}
-		rsize += head->len;
-		
-		TThread::Lock();
-		if (head->len >= sizeof(struct rec_header_struct)) {
-			CommonData->BlockCnt++;
-			if (head->type & REC_EVENT) {
-				Main->ProcessEvent(buf);
-				CommonData->EventCnt++;
-			} else if ((head->type & 0xFF000000) == REC_SELFTRIG) {
-				mod = head->type & 0xFFFF;
-				chan = (head->type >> 16) & 0xFF;
-				if (chan >=64 || mod > MAXWFD) {
-					Log("Channel (%d) or module (%d) out of range for selftrigger.\n", chan, mod);
-					CommonData->ErrorCnt++;					
-				} else {
-					Main->ProcessSelfTrig(mod, chan, (struct hw_rec_struct_self *)(buf + sizeof(struct rec_header_struct)));
-					CommonData->SelfTrigCnt++;
-				}
-			} else {
-				Log("Unknown block received: type=0x%X, len=%d.\n", head->type, head->len);
-				CommonData->ErrorCnt++;	
-			}
-		} else {
-			Log("The block length (%d) is too small.\n", head->len);
-			CommonData->ErrorCnt++;
-		}
-		TThread::UnLock();
-		
-		Cnt++;
-		if ((iNum > 0 && Cnt >= iNum) || (iNum == 0 && Cnt >= 20000)) {
-			if (iNum > 0) sleep(1);
-			iNum = Main->nPlayBlocks->GetIntNumber();
-			if (!Main->Follow->IsDown()) {
-				if (fsize) Main->PlayProgress->SetPosition(100.0*rsize/fsize);
-				snprintf(str, sizeof(str), "%s (%d/%d)", f->GetName(), FileCnt + 1, nFiles);
-				Main->fStatusBar->SetText(str, 5);
-			}
-			Cnt = 0;
-		}
-	}
-Ret:
-	if (fIn) fclose(fIn);
-	if (fdIn > 0) close(fdIn);
-	Main->fStatusBar->SetText("", 5);
-	if (buf) free(buf);
-	return NULL;
-}
-
-int FindMaxofShort(short int *data, int cnt)
-{
-	int i, M;
-	M = -32000;		// nearly minimum 16-bit signed value
-	for (i=0; i<cnt; i++) if (data[i] > M) M = data[i];
-	return M;
-}
-
-float FindHalfTime(short int *data, int cnt, int amp)
-{
-	int i;
-	float r;
-	for (i=0; i<cnt; i++) if (data[i] > amp/2) break;
-	if (!i || i == cnt) return 0;
-	r = amp;
-	r = (r/2 - data[i-1]) / (data[i] - data[i-1]);
-	return i + r - 1;
-}
-
-void Log(const char *msg, ...)
-{
-	char str[1024];
-	time_t t;
-	FILE *f;
-	va_list ap;
-
-	va_start(ap, msg);
-	t = time(NULL);
-	strftime(str, sizeof(str),"%F %T ", localtime(&t));
-	f = fopen(LOGFILENAME, "at");
-	fprintf(f, str);
-	vfprintf(f, msg, ap);
-	va_end(ap);
-	fclose(f);
 }
 
 /*	the main						*/
 int main(int argc, char **argv) 
 {
+	int irc;
+	irc = ReadConfig((argc > 1) ? argv[1] : DEFCONFIG);
+	if (irc) return irc;
    	TApplication theApp("DANSS_SHOW", &argc, argv);
-   	dshowMainFrame *frame = new dshowMainFrame(gClient->GetRoot(), 2000, 1000, (argc > 1) ? argv[1] : DEFCONFIG);
+   	dshowMainFrame *frame = new dshowMainFrame(gClient->GetRoot(), 2000, 1000);
    	theApp.Run();
    	return 0;
 }
