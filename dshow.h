@@ -49,8 +49,7 @@ private:
 	TRootEmbeddedCanvas *fEventCanvas;
 	TGNumberEntry *nPMTThreshold;
 	TGNumberEntry *nSiPMThreshold;
-	TGNumberEntry *nPMTSumThreshold;
-	TGNumberEntry *nSiPMSumThreshold;
+	TGNumberEntry *nSumEnergyThreshold;
 	TGRadioButton *rEvtAll;
 	TGRadioButton *rEvtNone;
 	TGRadioButton *rEvtVeto;
@@ -88,6 +87,9 @@ public:
 	void ResetSelfHists(void);
 	void ResetSpectrumHists(void);
 	void ResetTimeHists(void);
+	void OnPlayBlocksChanged(void);
+	void ChangeWaveFormPars(void);
+	void ChangeDisplayPars(void);
 	void Connect2Online(void);
 	void OnTimer(void);
 	void PlayFileDialog(void);

@@ -43,42 +43,26 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#include "dshow.h"
 #include "recformat.h"
 #include "dshow_global.h"
 
-/*	Process an event					*/
-void ProcessEvent(char *data)
+/*	Process event data - get hits and parameters		*/
+void ExtractHits(char *data)
 {
 	struct hw_rec_struct *rec;
 	struct rec_header_struct *head;
 	int i, iptr, len;
 	int amp;
-	float t, at;
-	int nat;
+	float t;
 	char strl[1024];
 	int mod, chan;
-	int evt_len;
-	void *ptr;
-	int sumPMT, sumSiPM, sumSiPMc;
-	int nSiPM, nSiPMc, nPMT;
-	long long gTime;
-	int gTrig;
-	int nHits;
-	int cHits;
-	float dtM, dtN, dr, drZ;
-	int PMTmask[2][5][5];
 
-	sumPMT = 0;
-	sumSiPM = 0;
-	nSiPM = 0;
-	sumSiPMc = 0;
-	nSiPMc = 0;
-	nPMT = 0;
-	gTime = -1;
-	nHits = 0;
-	cHits = 0;
-
+/*	Clear parameters	*/
+	Run.Event->gTime = -1;
+	Run.Event->NHits = 0;
+	Run.Event->Flags = 0;
+	Run.Event->EventCnt = Run.EventCnt;
+/*		Get records	*/
 	head = (struct rec_header_struct *)data;
 	for (iptr = sizeof(struct rec_header_struct); iptr < head->len; iptr += len) {		// record by record
 		rec = (struct hw_rec_struct *) &data[iptr];
@@ -86,12 +70,12 @@ void ProcessEvent(char *data)
 
 		if (iptr + len > head->len) {
 			Log("Unexpected end of event: iptr = %d, len = %d, total len = %d.\n", iptr, len, head->len);
-			CommonData->ErrorCnt++;
+			Run.ErrorCnt++;
 			return;
 		}
 		if (rec->module < 1 || rec->module > MAXWFD) {
 			Log("Module %d is out of range.\n", rec->module);
-			CommonData->ErrorCnt++;
+			Run.ErrorCnt++;
 			continue;
 		}
 		mod = rec->module;
@@ -102,346 +86,267 @@ void ProcessEvent(char *data)
 			amp = FindMaxofShort(&rec->d[1], rec->len - 2);							// Amplitude
 			t = NSPERCHAN * (FindHalfTime(&rec->d[1], rec->len - 2, amp) - rec->d[0] / 6.0);		// Time
 //			Extract Waveform for drawing
-			if (!CommonData->hWaveForm && rWaveTrig->IsOn() && nWFD->GetIntNumber() == mod && nChan->GetIntNumber() == chan 
-				&& amp > nWaveThreshold->GetIntNumber()) {
+			if (!Run.hWaveForm && Run.WaveFormType == WAVE_TRIG && Run.WaveFormChan == mod*100 + chan &&	amp > Run.WaveFormThr) {
 				sprintf(strl, "Event WaveForm for %d.%2.2d", mod, chan);
-				CommonData->hWaveForm = new TH1D("hWave", strl, rec->len - 2, 0, NSPERCHAN * (rec->len - 2));
-				CommonData->hWaveForm->SetStats(0);
-				for (i = 0; i < rec->len - 2; i++) CommonData->hWaveForm->SetBinContent(i + 1, (double) rec->d[i+1]);
-				CommonData->thisWaveFormCnt = CommonData->EventCnt;
+				Run.hWaveForm = new TH1D("hWave", strl, rec->len - 2, 0, NSPERCHAN * (rec->len - 2));
+				Run.hWaveForm->SetStats(0);
+				for (i = 0; i < rec->len - 2; i++) Run.hWaveForm->SetBinContent(i + 1, (double) rec->d[i+1]);
+				Run.thisWaveFormCnt = Run.EventCnt;
 			}
 //			Fill histogramms
-			CommonData->hAmpE[mod-1]->Fill((double)chan, (double)amp);
-			CommonData->hTimeA[mod-1]->Fill((double)chan, t);
-			if (amp > CommonData->TimeBThreshold) CommonData->hTimeB[mod-1]->Fill((double)chan, t);
+			Run.hAmpE[mod-1]->Fill((double)chan, (double)amp);
+			if (amp >= MINAMP) Run.hTimeA[mod-1]->Fill((double)chan, t);
+			if (amp > Conf.TimeBThreshold) Run.hTimeB[mod-1]->Fill((double)chan, t);
 //			Add hit to event structure
-			if (Map[mod-1][chan].type >= 0) {
-				if (nHits >= EventLength) {
-					ptr = realloc(Event, (EventLength + 1024) * sizeof(struct evt_disp_struct));
-					if (!ptr) break;
-					Event = (struct evt_disp_struct *)ptr;
-					EventLength += 1024;
+			if (Map[mod-1][chan].type >= 0 && amp >= MINAMP) {
+				if (Run.Event->NHits >= MAXHITS) {
+					Log("Too many hits %d > %d\n", Run.Event->NHits, MAXHITS);
+				} else {
+					Run.Event->hits[Run.Event->NHits].energy = amp * Map[mod-1][chan].Coef;
+					Run.Event->hits[Run.Event->NHits].time = t - Map[mod-1][chan].T0;
+					Run.Event->hits[Run.Event->NHits].mod = mod;
+					Run.Event->hits[Run.Event->NHits].type = Map[mod-1][chan].type;
+					Run.Event->hits[Run.Event->NHits].xy = Map[mod-1][chan].xy;
+					Run.Event->hits[Run.Event->NHits].z = Map[mod-1][chan].z;
+					Run.Event->hits[Run.Event->NHits].chan = chan;
+					Run.Event->hits[Run.Event->NHits].flag = 0;
 				}
-				Event[nHits].mod = mod;
-				Event[nHits].chan = chan;
-				Event[nHits].amp = amp;
-				Event[nHits].time = t;
-				Event[nHits].type = Map[mod-1][chan].type;
-				Event[nHits].xy = Map[mod-1][chan].xy;
-				Event[nHits].z = Map[mod-1][chan].z;
-				nHits++;
+				Run.Event->NHits;
 			}
 			break;
 		case TYPE_RAW:
 			amp = FindMaxofShort(&rec->d[1], rec->len - 2);
-//			Extract Waveform for drawing
-			if (!CommonData->hWaveForm && rWaveTrig->IsOn() && nWFD->GetIntNumber() == mod && nChan->GetIntNumber() == chan
-				&& amp > nWaveThreshold->GetIntNumber()) {
+//			Extract Waveform for drawing only
+			if (!Run.hWaveForm && Run.WaveFormType == WAVE_TRIG && Run.WaveFormChan == mod*100 + chan && amp > Run.WaveFormThr) {
 				sprintf(strl, "Event WaveForm for %d.%2.2d", mod, chan);
-				CommonData->hWaveForm = new TH1D("hWave", strl, rec->len - 2, 0, NSPERCHAN * (rec->len - 2));
-				CommonData->hWaveForm->SetStats(0);
-				for (i = 0; i < rec->len - 2; i++) CommonData->hWaveForm->SetBinContent(i + 1, (double) rec->d[i+1]);
+				Run.hWaveForm = new TH1D("hWave", strl, rec->len - 2, 0, NSPERCHAN * (rec->len - 2));
+				Run.hWaveForm->SetStats(0);
+				for (i = 0; i < rec->len - 2; i++) Run.hWaveForm->SetBinContent(i + 1, (double) rec->d[i+1]);
 			}
 			break;
 		case TYPE_SUM:
 			for (i = 0; i < rec->len - 2; i++) if (rec->d[i+1] & 0x4000) rec->d[i+1] |= 0x8000;		// do waveform data sign extension
 			amp = FindMaxofShort(&rec->d[1], rec->len - 2);
 //			Extract Waveform for drawing
-			if (!CommonData->hWaveForm && rWaveHist->IsOn() && nWFD->GetIntNumber() == mod && nChan->GetIntNumber() == chan
-				&& amp > nWaveThreshold->GetIntNumber()) {
-				sprintf(strl, "Event WaveForm for %d.%2.2d", mod, chan);
-				CommonData->hWaveForm = new TH1D("hWave", strl, rec->len - 2, 0, NSPERCHAN * (rec->len - 2));
-				CommonData->hWaveForm->SetStats(0);
-				for (i = 0; i < rec->len - 2; i++) CommonData->hWaveForm->SetBinContent(i + 1, (double) rec->d[i+1]);
+			if (!Run.hWaveForm && Run.WaveFormType == WAVE_HIST && Run.WaveFormChan / 100 == mod && amp > Run.WaveFormThr) {
+				sprintf(strl, "Hist WaveForm for %d", mod);
+				Run.hWaveForm = new TH1D("hWave", strl, rec->len - 2, 0, NSPERCHAN * (rec->len - 2));
+				Run.hWaveForm->SetStats(0);
+				for (i = 0; i < rec->len - 2; i++) Run.hWaveForm->SetBinContent(i + 1, (double) rec->d[i+1]);
 			}
 			break;
 		case TYPE_TRIG:
-			gTime = rec->d[1] + (((long long) rec->d[2]) << 15) + (((long long) rec->d[3]) << 30);
-			gTrig = rec->d[4] + (((int) rec->d[5]) << 15);
+			Run.Event->gTime = rec->d[1] + (((long long) rec->d[2]) << 15) + (((long long) rec->d[3]) << 30);
+			Run.Event->gTrig = rec->d[4] + (((int) rec->d[5]) << 15);
 			break;
 		}
 	}
-	if (gTime < 0) {
+	if (Run.Event->gTime < 0) {
 		Log("Trigger record (type = 2) was not found.\n");
-		CommonData->ErrorCnt++;
-		return;
+		Run.ErrorCnt++;
 	}
-//	check if a second passed
-	if (CommonData->gLastTime < 0) {
-		CommonData->gLastTime = gTime;
-		CommonData->gTime = gTime;
-		CommonData->gTrig = gTrig;
-	} else if (gTime - CommonData->gLastTime >= RATEPER * ONESECOND) {
-		CommonData->fRate[CommonData->iRatePos] = ((float) ONESECOND) * (gTrig - CommonData->gTrig) / (gTime - CommonData->gTime);
-		CommonData->iRatePos = (CommonData->iRatePos + 1) % RATELEN;
-		CommonData->gLastTime += RATEPER * ONESECOND;
-		CommonData->gTime = gTime;
-		CommonData->gTrig = gTrig;
-	}
-//
-//		TimeC
-	nat = 0;
+}
+
+void FineTimeAnalysis(void)
+{
+	int i;
+	double wSum;
+	double at;
+	int nSum;
+//		find fine time (energy weighted)
+	wSum = 0;
 	at = 0;
-	for (i = 0; i<nHits; i++) if (Event[i].amp > CommonData->TimeBThreshold && Event[i].type == TYPE_SIPM) {
-		at += Event[i].time;
-		nat++;
+	nSum = 0;
+	for (i = 0; i<Run.Event->NHits; i++) if (Run.Event->hits[i].energy > Conf.FineTimeThreshold && (Run.Event->hits[i].type == TYPE_SIPM || Run.Event->hits[i].type == TYPE_PMT)) {
+		at += Run.Event->hits[i].time * Run.Event->hits[i].energy;
+		wSum += Run.Event->hits[i].energy;
+		nSum++;
 	}
-	if (nat) {
-		at /= nat;
-		if (nat > 1) for (i = 0; i<nHits; i++) if (Event[i].amp > CommonData->TimeBThreshold) CommonData->hTimeC[Event[i].mod - 1]->Fill((double) Event[i].chan, Event[i].time - at);
+	if (nSum) {
+		at /= wSum;
+		if (nSum > 1) for (i = 0; i<Run.Event->NHits; i++) Run.hTimeC[Run.Event->hits[i].mod - 1]->Fill((double) Run.Event->hits[i].chan, Run.Event->hits[i].time - at);
+		for (i = 0; i<Run.Event->NHits; i++) if (fabs(Run.Event->hits[i].time - at) > Conf.SiPmWindow && Run.Event->hits[i].type == TYPE_SIPM) Run.Event->hits[i].flag = -10;	// clean by time
 	} else {
-		CommonData->hCuts->Fill(CUT_NOSITIME);
+		Run.Event->Flags |= FLAG_NOFINETIME;
 	}
-//		Create PMTmask
-	memset(PMTmask, 0, sizeof(PMTmask));
-	for (i=0; i<nHits; i++) if (Event[i].type == TYPE_PMT && Event[i].xy >= 0) PMTmask[Event[i].z & 1][Event[i].z/2][Event[i].xy] = 1;
-//		Clean the event
-	if (CleanLength < EventLength) {
-		ptr = realloc(CleanEvent, EventLength * sizeof(struct evt_disp_struct));
-		if (!ptr) return;
-		CleanEvent = (struct evt_disp_struct *) ptr;
-		CleanLength = EventLength;
+}
+
+void CleanByPmtConfirmation(void)
+{
+	int i, j;
+	for (i = 0; i<Run.Event->NHits; i++) if (Run.Event->hits[i].energy < Conf.SmallSiPmAmp && Run.Event->hits[i].type == TYPE_SIPM && Run.Event->hits[i].flag >= 0) {
+		for (j = 0; j<Run.Event->NHits; j++) if (Run.Event->hits[j].type == TYPE_PMT) {
+			if ((Run.Event->hits[i].z & 1) != (Run.Event->hits[j].z & 1)) continue;
+			if ((Run.Event->hits[i].z / 20) != (Run.Event->hits[j].z / 5)) continue;
+			if ((Run.Event->hits[i].xy / 5) != Run.Event->hits[j].xy) continue;
+			break;
+		}
+		if (j == Run.Event->NHits) Run.Event->hits[i].flag = -20;
 	}
-	for (i=0; i<nHits; i++) {
-		if (Event[i].xy < 0) continue;											// unknown position
-		if (Event[i].type == TYPE_SIPM && ((!nat) || fabs(Event[i].time - at) > CommonData->SiPMWindow)) continue;	// time window
-		if (Event[i].type == TYPE_SIPM && Event[i].amp < CommonData->TimeBThreshold && (!PMTmask[Event[i].z & 1][Event[i].z/20][Event[i].xy/5])) continue;	// support in PMT for small amplitudes
-		memcpy(&CleanEvent[cHits], &Event[i], sizeof(struct evt_disp_struct));
-		cHits++;
-	}
-	CalculateTags(cHits);
-	EventStuck[EventStuckPos].gTime = gTime;
-	for (i=0; i<cHits; i++) {
-		switch (CleanEvent[i].type) {
+}
+
+void CalculateParameters(void)
+{
+	int i, j, k;
+	double sumX, sumY;
+	double Amax;
+	int iMax;
+	int iFound;
+//		Zero...	
+	sumX = sumY = 0;
+	Run.Event->Energy = Run.Event->ClusterEnergy = Run.Event->VetoEnergy = 0;
+	Run.Event->VertexN[0] = Run.Event->VertexN[1] = Run.Event->VertexN[2] = 0;
+	Run.Event->VertexP[0] = Run.Event->VertexP[1] = Run.Event->VertexP[2] = 0;
+	Run.Event->SiPmHits = Run.Event->PmtHits = Run.Event->VetoHits = 0;
+//		Sum
+	for (i = 0; i<Run.Event->NHits; i++) if (Run.Event->hits[i].flag >= 0) {
+		switch(Run.Event->hits[i].type) {
 		case TYPE_SIPM:
-			sumSiPM += CleanEvent[i].amp;
-			nSiPM++;
-			if (CleanEvent[i].amp > CommonData->SummaSiPMThreshold) {
-				sumSiPMc += CleanEvent[i].amp;
-				nSiPMc++;					
+			Run.Event->Energy += Run.Event->hits[i].energy;
+			Run.Event->SiPmHits++;
+			Run.Event->VertexN[2] += Run.Event->hits[i].z * THICK;
+			if (Run.Event->hits[i].z & 1) {
+				sumX += 1;
+				Run.Event->VertexN[0] += Run.Event->hits[i].xy * WIDTH;
+			} else {
+				sumY += 1;
+				Run.Event->VertexN[1] += Run.Event->hits[i].xy * WIDTH;
 			}
 			break;
 		case TYPE_PMT:
-			sumPMT += CleanEvent[i].amp;
-			nPMT++;
+			Run.Event->Energy += Run.Event->hits[i].energy;
+			Run.Event->PmtHits++;
 			break;
+		case TYPE_VETO:
+			Run.Event->VetoEnergy += Run.Event->hits[i].energy;
+			Run.Event->VetoHits++;
 		}
 	}
-//	TH1D *hSiPMsum[2];	// SiPM summa, all/no veto
-	CommonData->hSiPMsum[0]->Fill(sumSiPMc / SIPM2MEV);
-//	TH1D *hSiPMhits[2];	// SiPM Hits, all/no veto
-	CommonData->hSiPMhits[0]->Fill(1.0*nSiPMc);
-//	TH1D *hPMTsum[2];	// PMT summa, all/no veto
-	CommonData->hPMTsum[0]->Fill(sumPMT / PMT2MEV);
-//	TH1D *hPMThits[2];	// PMT Hits, all/no veto
-	CommonData->hPMThits[0]->Fill(1.0*nPMT);
-//	TH1D *hSPRatio[2];	// SiPM sum to PTMT sum ratio, all/no veto
-	if (sumPMT > 0) CommonData->hSPRatio[0]->Fill(sumSiPMc * PMT2MEV / (sumPMT * SIPM2MEV));
-	if (!(EventFlags & FLAG_VETO)) {
-//	TH1D *hSiPMsum[2];	// SiPM summa, all/no veto
-		CommonData->hSiPMsum[1]->Fill(sumSiPMc / SIPM2MEV);
-//	TH1D *hSiPMhits[2];	// SiPM Hits, all/no veto
-		CommonData->hSiPMhits[1]->Fill(1.0*nSiPMc);
-//	TH1D *hPMTsum[2];	// PMT summa, all/no veto
-		CommonData->hPMTsum[1]->Fill(sumPMT / PMT2MEV);
-//	TH1D *hPMThits[2];	// PMT Hits, all/no veto
-		CommonData->hPMThits[1]->Fill(1.0*nPMT);
-//	TH1D *hSPRatio[2];	// SiPM sum to PTMT sum ratio, all/no veto
-		if (sumPMT > 0) CommonData->hSPRatio[1]->Fill(sumSiPMc * PMT2MEV / (sumPMT * SIPM2MEV));
+//		Calculate
+	Run.Event->Energy /= 2;	// SiPm + Pmt
+	if (sumX) {
+		Run.Event->VertexN[0] /= sumX;
+	} else {
+		Run.Event->VertexN[0] = -1;
 	}
-//		Copy event for drawing
-	if ((!CommonData->EventHits) && sumPMT >= nPMTSumThreshold->GetIntNumber() && sumSiPM >= nSiPMSumThreshold->GetIntNumber() && 
-		(rEvtAll->IsOn() || (rEvtNone->IsOn() && !EventFlags) || (rEvtVeto->IsOn() && (EventFlags & FLAG_VETO)) 
-		|| (rEvtPositron->IsOn() && (EventFlags & FLAG_POSITRON)) || (rEvtNeutron->IsOn() && (EventFlags & FLAG_NEUTRON)))) {
-		if (cHits > CommonData->EventLength) {
-			ptr = realloc(CommonData->Event, cHits * sizeof(struct evt_disp_struct));
-			if (ptr) {
-				CommonData->Event = (struct evt_disp_struct *) ptr;
-				memcpy(CommonData->Event, CleanEvent, cHits * sizeof(struct evt_disp_struct));
-				CommonData->EventLength = cHits;
-				CommonData->EventHits = cHits;
-			}
+	if (sumY) {
+		Run.Event->VertexN[1] /= sumY;
+	} else {
+		Run.Event->VertexN[1] = -1;
+	}
+	if (sumX + sumY) {
+		Run.Event->VertexN[2] /= sumX + sumY;
+	} else {
+		Run.Event->VertexN[2] = -1;
+	}
+//		Cluster
+	Amax = 0;
+	for (i = 0; i<Run.Event->NHits; i++) if (Run.Event->hits[i].flag >= 0 && Run.Event->hits[i].type == TYPE_SIPM && Run.Event->hits[i].energy > Amax) {
+		Amax = Run.Event->hits[i].energy;
+		iMax = i;
+	}
+	if (!Amax) {
+		Run.Event->VertexP[0] = Run.Event->VertexP[1] = Run.Event->VertexP[2] = -1;
+		return;
+	}
+	Run.Event->hits[iMax].flag = 10;
+
+	for (k=0; k<MAXCLUSTITER; k++) {
+		iFound = 0;
+		for (i = 0; i<Run.Event->NHits; i++) if (Run.Event->hits[i].flag >= 10)	for (j = 0; j<Run.Event->NHits; j++) 
+			if (Run.Event->hits[j].flag >= 0 && Run.Event->hits[j].flag < 10 && Run.Event->hits[j].type == TYPE_SIPM &&
+			IsNeighbors(Run.Event->hits[i].xy, Run.Event->hits[j].xy, Run.Event->hits[i].z, Run.Event->hits[j].z)) {
+			Run.Event->hits[j].flag = 20;
+			iFound++;
+		}
+		if(!iFound) break;
+	}
+
+	sumX = sumY = 0;
+	for (i = 0; i<Run.Event->NHits; i++) if (Run.Event->hits[i].flag >= 10) {
+		Run.Event->ClusterEnergy += Run.Event->hits[i].energy;
+		Run.Event->VertexP[2] += Run.Event->hits[i].energy * Run.Event->hits[i].z * THICK;
+		if (Run.Event->hits[i].z & 1) {
+			sumX += Run.Event->hits[i].energy;
+			Run.Event->VertexP[0] += Run.Event->hits[i].energy * Run.Event->hits[i].xy * WIDTH;
 		} else {
-			memcpy(CommonData->Event, CleanEvent, cHits * sizeof(struct evt_disp_struct));
-			CommonData->EventHits = cHits;
+			sumY += Run.Event->hits[i].energy;
+			Run.Event->VertexP[1] += Run.Event->hits[i].energy * Run.Event->hits[i].xy * WIDTH;
 		}
-		CommonData->EventFlags = EventFlags;
-		CommonData->EventEnergy = EventEnergy;
-		CommonData->thisEventCnt = CommonData->EventCnt;
+	}
+	if (sumX) {
+		Run.Event->VertexP[0] /= sumX;
+	} else {
+		Run.Event->VertexP[0] = -1;
+	}
+	if (sumY) {
+		Run.Event->VertexP[1] /= sumY;
+	} else {
+		Run.Event->VertexP[1] = -1;
+	}
+	if (sumX + sumY) {
+		Run.Event->VertexP[2] /= sumX + sumY;
+	} else {
+		Run.Event->VertexP[2] = -1;
 	}
 }
 
-/*	Check event for veto/positron/neutron signature		*/
-void dshowMainFrame::CalculateTags(int cHits)
+void CalculateTags(void)
 {
-	float xsum, exsum, ysum, eysum, zsum;
-	int nx, ny;
-	int ncHits;
-	float eall, eclust, r2, xy0;
-	float E;
-	int i, j;
-	int nVeto;
-	float sumVeto;
-	int newhits;
+//	Veto ?
+	if (Run.Event->VetoEnergy > Conf.VetoMin || Run.Event->VetoHits > 1 || Run.Event->Energy > Conf.DVetoMin) Run.Event->Flags |= FLAG_VETO;
+//	Positron ?
+	if (Run.Event->ClusterEnergy > Conf.PositronMin && Run.Event->ClusterEnergy < Conf.PositronMax && Run.Event->Energy - Run.Event->ClusterEnergy < Conf.MaxOffClusterEnergy ) Run.Event->Flags |= FLAG_POSITRON;
+//	Neutron ?
+	if (Run.Event->Energy > Conf.NeutronMin && Run.Event->ClusterEnergy < Conf.NeutronMax) Run.Event->Flags |= FLAG_NEUTRON;
+}
 
-	eall = 0;
-	for (i=0; i<cHits; i++) if (CleanEvent[i].type == TYPE_SIPM) eall += CleanEvent[i].amp;
-	eall /= SIPM2MEV;
+void FillHists(void) 
+{
+	;	// nothing rithg now - to be add
+}
 
-	EventFlags = 0;
-	EventEnergy = eall;
+void Event2Draw(void)
+{
+	int n;
+//		Check event type etc
+	if (Run.DisplayEvent->NHits) return;	// previous is still waiting for drawing
+	if (Run.Event->Energy < Run.DisplayEnergy) return;
+	switch (Run.DisplayType) {
+	case DISP_NONE:
+		if (Run.Event->Flags & (FLAG_VETO | FLAG_POSITRON | FLAG_NEUTRON)) return;
+		break;
+	case DISP_VETO:
+		if (!(Run.Event->Flags & FLAG_VETO)) return;
+		break;
+	case DISP_POSITRON:
+		if (!(Run.Event->Flags & FLAG_POSITRON)) return;
+		break;
+	case DISP_NEUTRON:
+		if (!(Run.Event->Flags & FLAG_NEUTRON)) return;
+		break;
+	}
+//		Copy event for drawing
+	memcpy(Run.DisplayEvent, Run.Event, sizeof(struct event_struct) - sizeof(struct hit_struct *));
+	n = Run.Event->NHits;
+	if (n > MAXHITS) n = MAXHITS;
+	memcpy(Run.DisplayEvent->hits, Run.Event->hits, n * sizeof(struct hit_struct));
+}
 
-//	VETO
-	nVeto = 0;
-	sumVeto  = 0;
-	for (i=0; i<cHits; i++) if (CleanEvent[i].type == TYPE_VETO) {
-		sumVeto += CleanEvent[i].amp;
-		nVeto++;
-	}
-	
-	if (nVeto > 1 || sumVeto > VETOMIN || EventEnergy > DVETOMIN) {
-		EventFlags |= FLAG_VETO;
-		// don't fill vertex
-		CommonData->hCuts->Fill(CUT_VETO);
-	}
-//	Check for neutron
-//		Calculate parameters
-//		"Gamma" center
-	xsum = ysum = zsum = 0;
-	nx = ny = 0;
-	
-	for (i=0; i<cHits; i++) if (CleanEvent[i].type == TYPE_SIPM) {
-		if (CleanEvent[i].z & 1) {	// X
-			nx++;
-			xsum += CleanEvent[i].xy;
-		} else {			// Y
-			ny++;
-			ysum += CleanEvent[i].xy;
-		}
-		zsum += CleanEvent[i].z;
-	}
-	if (nx) {
-		xsum *= WIDTH/nx;
-	} else {
-		xsum = -1;
-		CommonData->hCuts->Fill(CUT_NONX);
-	}
-	if (ny) {
-		ysum *= WIDTH/ny;
-	} else {
-		ysum = -1;
-		CommonData->hCuts->Fill(CUT_NONY);
-	}
-	if (nx + ny) {
-		zsum *= THICK/(nx + ny);
-	} else {
-		zsum = -1;
-		CommonData->hCuts->Fill(CUT_NONZ);
-	}
-	EventStuck[EventStuckPos].VertexN[0] = xsum;
-	EventStuck[EventStuckPos].VertexN[1] = ysum;
-	EventStuck[EventStuckPos].VertexN[2] = zsum;
-
-//		Count clusters and neutron energy
-	ncHits = nx + ny;
-//		Implement criteria
-	if (ncHits >= Pars.nMin && EventEnergy > Pars.eNMin && EventEnergy < Pars.eNMax) {
-		EventFlags |= FLAG_NEUTRON; 
-		CommonData->hTagEnergy[1]->Fill(EventEnergy);
-		CommonData->hTagXY[1]->Fill(xsum, ysum);
-		CommonData->hTagZ[1]->Fill(zsum);
-		CommonData->hCuts->Fill(CUT_NEUTRON);
-	}
-	if (ncHits < Pars.nMin) CommonData->hCuts->Fill(CUT_NMULT);
-	if (eclust <= Pars.eNMin || eclust >= Pars.eNMax) CommonData->hCuts->Fill(CUT_NENERGY);
-	
-//		Check for pisitron
-//		Find consequtive cluster near EMAX strip
-//		find EMAX hit
-	E = 0;
-	j = 0;
-	eclust = 0;
-	xsum = ysum = zsum = 0;
-	exsum = eysum = 0;
-	for (i=0; i<cHits; i++) if (CleanEvent[i].type == TYPE_SIPM) if (CleanEvent[i].amp > E) {
-		E = CleanEvent[i].amp;
-		j = i;
-	}
-	if (E > 0) {
-//		Add EMAX hit to the sum
-		CleanEvent[j].in = 1;
-		ncHits = 1;
-		eclust = CleanEvent[j].amp;
-		if (CleanEvent[j].z & 1) {	// X
-			exsum = CleanEvent[j].amp;
-			xsum = CleanEvent[j].amp * CleanEvent[j].xy;
-		} else {			// Y
-			eysum = CleanEvent[j].amp;
-			ysum = CleanEvent[j].amp * CleanEvent[j].xy;
-		}
-		zsum = CleanEvent[j].amp * CleanEvent[j].z;
-//		Look for neighbors
-		for (;;) {
-			newhits = 0;
-			for (i=0; i<cHits; i++) for (j=0; j<cHits; j++) if (CleanEvent[i].type == TYPE_SIPM && CleanEvent[j].in && !CleanEvent[i].in && neighbors(CleanEvent[i].xy, CleanEvent[j].xy, CleanEvent[i].z, CleanEvent[j].z)) {
-				if (CleanEvent[i].z & 1) {	// X
-					exsum += CleanEvent[i].amp;
-					xsum += CleanEvent[i].amp * CleanEvent[i].xy;
-				} else {			// Y
-					eysum += CleanEvent[i].amp;
-					ysum += CleanEvent[i].amp * CleanEvent[i].xy;
-				}
-				zsum += CleanEvent[i].amp * CleanEvent[i].z;
-				ncHits++;
-				eclust += CleanEvent[i].amp;
-				newhits++;
-				CleanEvent[i].in = 1;
-			}
-			if (!newhits) break;
-		}
-	}
-	eclust /= SIPM2MEV;
-	if (exsum > 0) {
-		xsum *= WIDTH/exsum;
-	} else {
-		xsum = -1;
-	}
-	if (eysum > 0) {
-		ysum *= WIDTH/eysum;
-	} else {
-		ysum = -1;
-	}
-	if (exsum + eysum > 0) {
-		zsum *= THICK/(exsum + eysum);
-	} else {
-		zsum = -1;
-	}
-	ClusterEnergy = eclust;
-	EventStuck[EventStuckPos].VertexP[0] = xsum;
-	EventStuck[EventStuckPos].VertexP[1] = ysum;
-	EventStuck[EventStuckPos].VertexP[2] = zsum;
-	
-//		Implement criteria
-	if (ncHits <= Pars.nClustMax && eclust > Pars.ePosMin && eclust < Pars.ePosMax && EventEnergy - eclust < Pars.eGammaMax) {
-		EventFlags |= FLAG_POSITRON;
-		EventEnergy = eclust;
-		CommonData->hTagEnergy[0]->Fill(ClusterEnergy);
-		CommonData->hTagXY[0]->Fill(xsum, ysum);
-		CommonData->hTagZ[0]->Fill(zsum);
-		CommonData->hCuts->Fill(CUT_POSITRON);
-	}
-	if (ncHits > Pars.nClustMax) CommonData->hCuts->Fill(CUT_PMULT);
-	if (eclust <= Pars.ePosMin || eclust >= Pars.ePosMax) CommonData->hCuts->Fill(CUT_PENERGY);
-	if (EventEnergy - eclust >= Pars.eGammaMax) CommonData->hCuts->Fill(CUT_PFRACTION);
-	CommonData->hCuts->Fill(CUT_NONE);
-
-	EventStuck[EventStuckPos].Energy = EventEnergy;
-	EventStuck[EventStuckPos].ClusterEnergy = ClusterEnergy;
-	EventStuck[EventStuckPos].Flags = EventFlags;
+/*	Process an event					*/
+void ProcessEvent(char *data)
+{
+	ExtractHits(data);
+	FineTimeAnalysis();
+	CleanByPmtConfirmation();
+	CalculateParameters();
+	CalculateTags();
+	FillHists();
+	Event2Draw();
 }
 
 /*	Process SelfTrigger					*/
-void dshowMainFrame::ProcessSelfTrig(int mod, int chan, struct hw_rec_struct_self *data)
+void ProcessSelfTrig(int mod, int chan, struct hw_rec_struct_self *data)
 {
 	int i, amp;
 	char strl[1024];
@@ -450,14 +355,13 @@ void dshowMainFrame::ProcessSelfTrig(int mod, int chan, struct hw_rec_struct_sel
 	for (i = 0; i < data->len - 2; i++) if (data->d[i] & 0x4000) data->d[i] |= 0x8000;
 	amp = FindMaxofShort(data->d, data->len - 2);
 //	Graph
-	if (!CommonData->hWaveForm && rWaveSelf->IsOn() && nWFD->GetIntNumber() == mod && nChan->GetIntNumber() == chan &&
-		amp > nWaveThreshold->GetIntNumber()) {
+	if (!Run.hWaveForm && Run.WaveFormType == WAVE_SELF && Run.WaveFormChan == mod*100 + chan &&	amp > Run.WaveFormThr) {
 		sprintf(strl, "Self WaveForm for %d.%2.2d", mod, chan);
-		CommonData->hWaveForm = new TH1D("hWave", strl, data->len - 2, 0, NSPERCHAN * (data->len - 2));
-		for (i = 0; i < data->len - 2; i++) CommonData->hWaveForm->SetBinContent(i + 1, (double) data->d[i]);
+		Run.hWaveForm = new TH1D("hWave", strl, data->len - 2, 0, NSPERCHAN * (data->len - 2));
+		for (i = 0; i < data->len - 2; i++) Run.hWaveForm->SetBinContent(i + 1, (double) data->d[i]);
 	}
 //	WFD->MAX(Chan) (self)
-	CommonData->hAmpS[mod-1]->Fill((double)chan, (double)amp);
+	Run.hAmpS[mod-1]->Fill((double)chan, (double)amp);
 }
 
 /*	Read one record.						*/
@@ -481,7 +385,7 @@ int GetFileRecord(char *buf, int buf_size, FILE *f)
 /*	Read one record	from TCP stream.				*/
 /*	Return 1 if OK, negative on error.				*/
 /*	Watch for iStop. Return 0 on iStop.				*/
-int GetTCPRecord(char *buf, int buf_size, int fd, int *iStop)
+int GetTCPRecord(char *buf, int buf_size, int fd)
 {
 	int Cnt;
 	int irc;
@@ -489,7 +393,7 @@ int GetTCPRecord(char *buf, int buf_size, int fd, int *iStop)
 	struct timeval tm;
 //		Read length
 	Cnt = 0;
-	while (!(*iStop) && Cnt < sizeof(int)) {
+	while (!Run.iThreadStop && Cnt < sizeof(int)) {
 		irc = read(fd, &buf[Cnt], sizeof(int) - Cnt);
 		if (irc < 0) Log("Read error (irc=%d) %m\n", irc);
 		if (irc < 0 && (errno == EINTR || errno == EAGAIN)) {
@@ -506,7 +410,7 @@ int GetTCPRecord(char *buf, int buf_size, int fd, int *iStop)
 		}
 	}
 
-	if (*iStop) return 0;
+	if (Run.iThreadStop) return 0;
 
 	len = *((int *)buf);
 	if (len < sizeof(int) || len > buf_size) {
@@ -516,7 +420,7 @@ int GetTCPRecord(char *buf, int buf_size, int fd, int *iStop)
 	}
 
 //		Read the rest
-	while (!(*iStop) && Cnt < len) {
+	while (!Run.iThreadStop && Cnt < len) {
 		irc = read(fd, &buf[Cnt], len - Cnt);
 		if (irc < 0) Log("Read error (irc=%d) %m\n", irc);
 		if (irc < 0 && (errno == EINTR || errno == EAGAIN)) {
@@ -532,7 +436,7 @@ int GetTCPRecord(char *buf, int buf_size, int fd, int *iStop)
 			Cnt += irc;
 		}
 	}
-	if (*iStop) return 0;
+	if (Run.iThreadStop) return 0;
 	return 1;
 }
 /*	Open data file either directly or via zcat etc, depending on the extension	*/
@@ -563,7 +467,7 @@ FILE* OpenDataFile(const char *fname, off_t *size)
 	return f;
 }
 
-/*	Open TCP connection to dsink							*/
+/*	Open TCP connection to dsink			*/
 int OpenTCP(const char *hname, int port) 
 {
 	struct hostent *host;
@@ -591,8 +495,7 @@ int OpenTCP(const char *hname, int port)
 /*	Data analysis thread				*/
 void *DataThreadFunction(void *ptr)
 {
-	struct common_data_struct *CommonData;
-	dshowMainFrame *Main;
+	TGFileInfo *PlayFile;
 	char *buf;
 	struct rec_header_struct *head;
 	int irc;
@@ -609,80 +512,71 @@ void *DataThreadFunction(void *ptr)
 	char str[256];
 	time_t lastConnect;
 	
-	Main = (dshowMainFrame *)ptr;
-	CommonData = Main->CommonData;
-	CommonData->iError = 0;
+	Message("");
+	PlayFile = (TGFileInfo *)ptr;
 	
 	buf = (char *)malloc(BSIZE);
 	if (!buf) {
-		CommonData->iError = 10;
+		Message("DataThread FATAL: no memory!");
 		goto Ret;
 	}
 	head = (struct rec_header_struct *) buf;
 	fIn = NULL;
 	fdIn = 0;
 	
-	if (Main->Follow->IsDown()) {
-		fdIn = OpenTCP(Main->Pars.HostName, Main->Pars.HostPort);
+	if (!PlayFile) {
+		fdIn = OpenTCP(Conf.ServerName, Conf.ServerPort);
 		lastConnect = time(NULL);
 		nFiles = 0;
 		fsize = 0;
-		snprintf(str, sizeof(str), "Online(%s:%d)", Main->Pars.HostName, Main->Pars.HostPort);
+		Message("Online(%s:%d)", Conf.ServerName, Conf.ServerPort);
 	} else {
-		f = Main->PlayFile->fFileNamesList->First();
+		f = PlayFile->fFileNamesList->First();
 		fIn = OpenDataFile(f->GetName(), &fsize);
-		nFiles = Main->PlayFile->fFileNamesList->GetEntries();
-		snprintf(str, sizeof(str), "%s (%d/%d)", f->GetName(), FileCnt + 1, nFiles);
+		nFiles = PlayFile->fFileNamesList->GetEntries();
+		Message("%s (%d/%d)", f->GetName(), FileCnt + 1, nFiles);
 	}
 	if (!fIn && fdIn <= 0) {
-		CommonData->iError = 15;
-		if (Main->Follow->IsDown()) Main->Follow->SetState(kButtonUp);
+		Message("DataThread start failed!");
 		goto Ret;
 	}
-	Main->fStatusBar->SetText(str, 5);
-	iNum = Main->nPlayBlocks->GetIntNumber();
 	FileCnt = 0;
-	Main->PlayProgress->SetPosition(0);
-	Main->FileProgress->SetPosition(0);
 	rsize = 0;
 	Cnt = 0;
+	FileProgress(0, 0);
 	
-	while (!CommonData->iStop) {
-		irc = (Main->Follow->IsDown()) ? GetTCPRecord(buf, BSIZE, fdIn, &CommonData->iStop) : GetFileRecord(buf, BSIZE, fIn);
+	while (!Run.iThreadStop) {
+		irc = (!PlayFile) ? GetTCPRecord(buf, BSIZE, fdIn) : GetFileRecord(buf, BSIZE, fIn);
 		if (irc < 0) {
-			if (Main->Follow->IsDown()) {
+			if (!PlayFile) {
 				if (time(NULL) - lastConnect > 30) {	// Try to reconnect
 					sleep(5);
-					fdIn = OpenTCP(Main->Pars.HostName, Main->Pars.HostPort);
+					fdIn = OpenTCP(Conf.ServerName, Conf.ServerPort);
 					if (fdIn <= 0) {
-						CommonData->iError = 15;
-						Main->Follow->SetState(kButtonUp);
+						Message("Reconnection to %s:%d failed", Conf.ServerName, Conf.ServerPort); 
 						break;
 					}
 					lastConnect = time(NULL);
 					continue;
 				} else {
+					Message("Too many reconnections to %s:%d", Conf.ServerName, Conf.ServerPort); 
 					fdIn = irc;
-					Main->Follow->SetState(kButtonUp);
 				}
 			}
-			CommonData->iError = -irc;
 			break;
-		} else if (CommonData->iStop) {
+		} else if (Run.iThreadStop) {
 			break;
 		} else if (irc == 0) {
 			//	check if we have file after
 			FileCnt++;
-			Main->PlayProgress->SetPosition(0);
-			Main->FileProgress->SetPosition(FileCnt * 100.0 / nFiles);
-			if (Main->PlayFile->fFileNamesList->After(f)) {
-				f = Main->PlayFile->fFileNamesList->After(f);
-				snprintf(str, sizeof(str), "%s (%d/%d)", f->GetName(), FileCnt + 1, nFiles);
-				Main->fStatusBar->SetText(str, 5);
+			FileProgress(0, FileCnt * 100.0 / nFiles);
+			if (PlayFile->fFileNamesList->After(f)) {
+				f = PlayFile->fFileNamesList->After(f);
+				Message("%s (%d/%d)", f->GetName(), FileCnt + 1, nFiles);
 				fclose(fIn);
 				fIn = OpenDataFile(f->GetName(), &fsize);
 				if (!fIn) {
-					CommonData->iError = 25;
+					Message("Can not open the next file: %s", f->GetName());
 					break;
 				}
 				rsize = 0;
@@ -696,38 +590,33 @@ void *DataThreadFunction(void *ptr)
 		
 		TThread::Lock();
 		if (head->len >= sizeof(struct rec_header_struct)) {
-			CommonData->BlockCnt++;
+			Run.BlockCnt++;
 			if (head->type & REC_EVENT) {
-				Main->ProcessEvent(buf);
-				CommonData->EventCnt++;
+				ProcessEvent(buf);
+				Run.EventCnt++;
 			} else if ((head->type & 0xFF000000) == REC_SELFTRIG) {
 				mod = head->type & 0xFFFF;
 				chan = (head->type >> 16) & 0xFF;
 				if (chan >=64 || mod > MAXWFD) {
 					Log("Channel (%d) or module (%d) out of range for selftrigger.\n", chan, mod);
-					CommonData->ErrorCnt++;					
+					Run.ErrorCnt++;					
 				} else {
-					Main->ProcessSelfTrig(mod, chan, (struct hw_rec_struct_self *)(buf + sizeof(struct rec_header_struct)));
-					CommonData->SelfTrigCnt++;
+					ProcessSelfTrig(mod, chan, (struct hw_rec_struct_self *)(buf + sizeof(struct rec_header_struct)));
+					Run.SelfTrigCnt++;
 				}
-			} else {
-				Log("Unknown block received: type=0x%X, len=%d.\n", head->type, head->len);
-				CommonData->ErrorCnt++;	
-			}
+			}	// silently ignore unknown blocks - we have more block types now.
 		} else {
 			Log("The block length (%d) is too small.\n", head->len);
-			CommonData->ErrorCnt++;
+			Run.ErrorCnt++;
 		}
 		TThread::UnLock();
 		
 		Cnt++;
-		if ((iNum > 0 && Cnt >= iNum) || (iNum == 0 && Cnt >= 20000)) {
-			if (iNum > 0) sleep(1);
-			iNum = Main->nPlayBlocks->GetIntNumber();
-			if (!Main->Follow->IsDown()) {
-				if (fsize) Main->PlayProgress->SetPosition(100.0*rsize/fsize);
-				snprintf(str, sizeof(str), "%s (%d/%d)", f->GetName(), FileCnt + 1, nFiles);
-				Main->fStatusBar->SetText(str, 5);
+		if ((Run.iPlayBlocks > 0 && Cnt >= Run.iPlayBlocks) || (Run.iPlayBlocks == 0 && Cnt >= 20000)) {
+			if (Run.iPlayBlocks > 0) sleep(1);
+			if (PlayFile) {
+				if (fsize) FileProgress(100.0*rsize/fsize, FileCnt * 100.0 / nFiles);
+				Message("%s (%d/%d)", f->GetName(), FileCnt + 1, nFiles);
 			}
 			Cnt = 0;
 		}
@@ -735,7 +624,6 @@ void *DataThreadFunction(void *ptr)
 Ret:
 	if (fIn) fclose(fIn);
 	if (fdIn > 0) close(fdIn);
-	Main->fStatusBar->SetText("", 5);
 	if (buf) free(buf);
 	return NULL;
 }
@@ -782,5 +670,24 @@ void Log(const char *msg, ...)
 	vfprintf(f, msg, ap);
 	va_end(ap);
 	fclose(f);
+}
+
+void Message(const char *msg, ...)
+{
+	va_list ap;
+
+	if (!TThread::TryLock()) return;
+	va_start(ap, msg);
+	vsnprintf(Run.msg, sizeof(Run.msg), msg, ap);
+	va_end(ap);
+	TThread::UnLock();
+}
+
+void FileProgress(double inFile, double inNumber)
+{
+	TThread::Lock();
+	Run.inFile = inFile;
+	Run.inNumber = inNumber;
+	TThread::UnLock();
 }
 

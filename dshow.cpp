@@ -44,7 +44,7 @@
 #include <unistd.h>
 #include "dshow.h"
 #include "recformat.h"
-#include "dshow_globasl.h"
+#include "dshow_global.h"
 
 const char *DataFileTypes[] = {"Data files", "*.dat*", "All files", "*", 0, 0};
 const char *SaveFileTypes[] = {"Root files", "*.root", "PDF", "*.pdf", "PostScript", "*.ps", "JPEG", "*.jpg", "GIF", "*.gif", "PNG", "*.png", "All files", "*", 0, 0};
@@ -59,7 +59,7 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h) : TGMainFr
 {
 	char strs[64];
 	char strl[1024];
-	Int_t StatusBarParts[] = {30, 10, 10, 10, 10, 30};	// status bar parts
+	Int_t StatusBarParts[] = {10, 10, 10, 10, 10, 50};	// status bar parts
 	Double_t RGB_r[]    = {0., 0.0, 1.0, 1.0, 1.0};
    	Double_t RGB_g[]    = {0., 0.0, 0.0, 1.0, 1.0};
    	Double_t RGB_b[]    = {0., 1.0, 0.0, 0.0, 1.0};
@@ -71,6 +71,8 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h) : TGMainFr
 	gROOT->SetStyle("Plain");
 	gStyle->SetOptStat("e");
 	gStyle->SetOptFit(11);
+	InitHist();
+
 //	TLegend
 	TimeLegend = new TLegend(0.65, 0.8, 0.99, 0.89);
 	TimeLegend->AddEntry(Run.hTimeA[0], "All events", "L");
@@ -118,12 +120,14 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h) : TGMainFr
    	vframe->AddFrame(lb, new TGLayoutHints(kLHintsLeft | kLHintsTop, 5, 5, 3, 4));		
 	nWFD = new TGNumberEntry(vframe, 1, 2, -1, TGNumberFormat::kNESInteger, TGNumberFormat::kNEANonNegative, TGNumberFormat::kNELLimitMinMax, 1, MAXWFD);
 	nWFD->SetIntNumber(1);
+	nWFD->Connect("ValueSet(Long_t)", "dshowMainFrame", this, "ChangeWaveFormPars()");
    	vframe->AddFrame(nWFD, new TGLayoutHints(kLHintsCenterX | kLHintsTop, 5, 5, 3, 4));	
 
 	lb = new TGLabel(vframe, "Channel:");
    	vframe->AddFrame(lb, new TGLayoutHints(kLHintsLeft | kLHintsTop, 5, 5, 3, 4));		
 	nChan = new TGNumberEntry(vframe, 0, 2, -1, TGNumberFormat::kNESInteger, TGNumberFormat::kNEANonNegative, TGNumberFormat::kNELLimitMinMax, 0, 63);
 	nChan->SetIntNumber(0);
+	nChan->Connect("ValueSet(Long_t)", "dshowMainFrame", this, "ChangeWaveFormPars()");
    	vframe->AddFrame(nChan, new TGLayoutHints(kLHintsCenterX  | kLHintsTop, 5, 5, 3, 4));
 
 	TGGroupFrame *grPlay = new TGGroupFrame(vframe, "Play a file", kVerticalFrame);
@@ -140,6 +144,7 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h) : TGMainFr
    	grPlay->AddFrame(lb, new TGLayoutHints(kLHintsLeft | kLHintsTop, 5, 5, 3, 4));
 	nPlayBlocks = new TGNumberEntry(grPlay, 0, 8, -1, TGNumberFormat::kNESInteger, TGNumberFormat::kNEANonNegative);
 	nPlayBlocks->SetIntNumber(0);
+	nPlayBlocks->Connect("ValueSet(Long_t)", "dshowMainFrame", this, "OnPlayBlocksChanged()");
    	grPlay->AddFrame(nPlayBlocks, new TGLayoutHints(kLHintsCenterX  | kLHintsTop, 5, 5, 3, 4));
 
 	PlayProgress = new TGHProgressBar(grPlay, TGProgressBar::kStandard, 100);
@@ -179,7 +184,6 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h) : TGMainFr
 	fStatusBar = new TGStatusBar(this, 50, 10, kHorizontalFrame);
 	fStatusBar->SetParts(StatusBarParts, sizeof(StatusBarParts) / sizeof(Int_t));
 	AddFrame(fStatusBar, new TGLayoutHints(kLHintsBottom | kLHintsExpandX, 0, 0, 2, 0));
-	Run.msg[0] = '\0';
 
    	// Sets window name and shows the main frame
    	SetWindowName("DANSS Show. Version of " __TIMESTAMP__ ".");
@@ -198,7 +202,7 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h) : TGMainFr
 /*	Main Window destructor				*/
 dshowMainFrame::~dshowMainFrame(void) 
 {
-	Run.iStop = 1;
+	Run.iThreadStop = 1;
 	delete OneSecond;
 	if (DataThread) DataThread->Join();
 	Cleanup();
@@ -232,12 +236,16 @@ void dshowMainFrame::CreateWaveTab(TGTab *tab)
 	rWaveTrig = new TGRadioButton(bg, "&Event  ");
 	rWaveHist = new TGRadioButton(bg, "&History");
 	rWaveSelf->SetState(kButtonDown);
+	rWaveSelf->Connect("Clicked()", "dshowMainFrame", this, "ChangeWaveFormPars()");
+	rWaveTrig->Connect("Clicked()", "dshowMainFrame", this, "ChangeWaveFormPars()");
+	rWaveHist->Connect("Clicked()", "dshowMainFrame", this, "ChangeWaveFormPars()");
    	hframe->AddFrame(bg, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));
 
 	lb = new TGLabel(hframe, "Threshold:");
    	hframe->AddFrame(lb, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));		
 	nWaveThreshold = new TGNumberEntry(hframe, 0, 5, -1, TGNumberFormat::kNESInteger, TGNumberFormat::kNEANonNegative);
 	nWaveThreshold->SetIntNumber(0);
+	nWaveThreshold->Connect("ValueSet(Long_t)", "dshowMainFrame", this, "ChangeWaveFormPars()");
    	hframe->AddFrame(nWaveThreshold, new TGLayoutHints(kLHintsLeft  | kLHintsCenterY, 5, 5, 3, 4));
  
     	me->AddFrame(hframe, new TGLayoutHints(kLHintsBottom | kLHintsExpandX, 2, 2, 2, 2));
@@ -306,14 +314,6 @@ void dshowMainFrame::CreateTimeTab(TGTab *tab)
 	rTimeAll->SetState(kButtonDown);
    	hframe->AddFrame(bg, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));
 
-	lb = new TGLabel(hframe, "SiPM +- Time window, ns:");
-   	hframe->AddFrame(lb, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 15, 5, 3, 4));
-	nSiPMWindow = new TGNumberEntry(hframe, 0, 5, -1, TGNumberFormat::kNESRealTwo, TGNumberFormat::kNEANonNegative);
-	Run.SiPMWindow = 20;	// ns
-	nSiPMWindow->SetNumber(Run.SiPMWindow);
-	nSiPMWindow->Connect("ValueSet(Long_t)", "dshowMainFrame", this, "ChangeSummaPars()");
-   	hframe->AddFrame(nSiPMWindow, new TGLayoutHints(kLHintsLeft  | kLHintsCenterY, 5, 5, 3, 4));
-
    	TGTextButton *reset = new TGTextButton(hframe,"&Reset");
 	reset->Connect("Clicked()", "dshowMainFrame", this, "ResetTimeHists()");
    	hframe->AddFrame(reset, new TGLayoutHints(kLHintsCenterY | kLHintsRight, 5, 5, 3, 4));
@@ -349,17 +349,12 @@ void dshowMainFrame::CreateEventTab(TGTab *tab)
 	nSiPMThreshold->SetIntNumber(10);
    	hframe->AddFrame(nSiPMThreshold, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));
 
-	lb = new TGLabel(hframe, "PMT Sum Threshold:");
+	lb = new TGLabel(hframe, "Sum Energy Threshold:");
    	hframe->AddFrame(lb, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));		
-	nPMTSumThreshold = new TGNumberEntry(hframe, 0, 5, -1, TGNumberFormat::kNESInteger, TGNumberFormat::kNEANonNegative);
-	nPMTSumThreshold->SetIntNumber(100);
-   	hframe->AddFrame(nPMTSumThreshold, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));
-
-	lb = new TGLabel(hframe, "SiPM Sum Threshold:");
-   	hframe->AddFrame(lb, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));		
-	nSiPMSumThreshold = new TGNumberEntry(hframe, 0, 5, -1, TGNumberFormat::kNESInteger, TGNumberFormat::kNEANonNegative);
-	nSiPMSumThreshold->SetIntNumber(100);
-   	hframe->AddFrame(nSiPMSumThreshold, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));
+	nSumEnergyThreshold = new TGNumberEntry(hframe, 0, 5, -1, TGNumberFormat::kNESRealTwo, TGNumberFormat::kNEANonNegative);
+	nSumEnergyThreshold->SetNumber(1.0);
+	nSumEnergyThreshold->Connect("ValueSet(Long_t)", "dshowMainFrame", this, "ChangeDisplayPars()");
+   	hframe->AddFrame(nSumEnergyThreshold, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));
 
 	TGButtonGroup *bg = new TGButtonGroup(hframe, "Tagged as", kHorizontalFrame);
 	rEvtAll      = new TGRadioButton(bg, "&Any       ");
@@ -368,6 +363,11 @@ void dshowMainFrame::CreateEventTab(TGTab *tab)
 	rEvtPositron = new TGRadioButton(bg, "&Positron  ");
 	rEvtNeutron  = new TGRadioButton(bg, "&Neutron   ");
 	rEvtAll->SetState(kButtonDown);
+	rEvtAll->Connect("Clicked()", "dshowMainFrame", this, "ChangeDisplayPars()");
+	rEvtNone->Connect("Clicked()", "dshowMainFrame", this, "ChangeDisplayPars()");
+	rEvtVeto->Connect("Clicked()", "dshowMainFrame", this, "ChangeDisplayPars()");
+	rEvtPositron->Connect("Clicked()", "dshowMainFrame", this, "ChangeDisplayPars()");
+	rEvtNeutron->Connect("Clicked()", "dshowMainFrame", this, "ChangeDisplayPars()");
    	hframe->AddFrame(bg, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));
 
     	me->AddFrame(hframe, new TGLayoutHints(kLHintsBottom | kLHintsExpandX, 2, 2, 2, 2));
@@ -383,7 +383,7 @@ void dshowMainFrame::CreateRateTab(TGTab *tab)
 }
 
 /*	Create histogramms						*/
-void dshowMainFrame::InitHists(void)
+void dshowMainFrame::InitHist(void)
 {
 	int i;
 	char strs[128];
@@ -438,9 +438,10 @@ void dshowMainFrame::DoDraw(void)
 	chan = nChan->GetIntNumber();
 
 	TThread::Lock();
-
+/*		Progress bars		*/
+	PlayProgress->SetPosition(Run.inFile);
+	FileProgress->SetPosition(Run.inNumber);
 /*		Status bar		*/
-	fStatusBar->SetText(msg ,0);
 	snprintf(str, sizeof(str), "Blocks: %d", Run.BlockCnt);
 	fStatusBar->SetText(str, 1);
 	snprintf(str, sizeof(str), "Events: %d", Run.EventCnt);
@@ -449,6 +450,8 @@ void dshowMainFrame::DoDraw(void)
 	fStatusBar->SetText(str, 3);
 	snprintf(str, sizeof(str), "Errors: %d", Run.ErrorCnt);
 	fStatusBar->SetText(str, 4);
+	Run.msg[sizeof(Run.msg)-1] = '\0';
+	fStatusBar->SetText(Run.msg, 5);
 /*		File processing status	*/
 
 /*		Scope			*/
@@ -545,8 +548,8 @@ void dshowMainFrame::DoDraw(void)
 	if (Map[mod][0].type == TYPE_SIPM) {
 		ln.SetLineColor(kRed);
 		ln.SetLineWidth(2);
-		ln.DrawLine(-Conf.SiPMWindow, 0, -Conf.SiPMWindow, h);
-		ln.DrawLine( Conf.SiPMWindow, 0,  Conf.SiPMWindow, h);
+		ln.DrawLine(-Conf.SiPmWindow, 0, -Conf.SiPmWindow, h);
+		ln.DrawLine( Conf.SiPmWindow, 0,  Conf.SiPmWindow, h);
 	}
    	fCanvas->Update();
 
@@ -680,7 +683,7 @@ void dshowMainFrame::PlayFileDialog(void)
 	new TGFileDialog(gClient->GetRoot(), this, kFDOpen, PlayFile);
 
 	if (PlayFile->fFileNamesList && PlayFile->fFileNamesList->First()) {
-		Run.iStop = 0;
+		Run.iThreadStop = 0;
 		DataThread = new TThread("DataThread", DataThreadFunction, (void *) PlayFile);
 		DataThread->Run();
 	}
@@ -753,7 +756,7 @@ void dshowMainFrame::SaveDialog(void)
 
 void dshowMainFrame::PlayFileStop(void)
 {
-	Run.iStop = 1;
+	Run.iThreadStop = 1;
 	PlayProgress->SetPosition(0.0);
 	if (DataThread) DataThread->Join();
 	DataThread = NULL;
@@ -762,7 +765,7 @@ void dshowMainFrame::PlayFileStop(void)
 void dshowMainFrame::SaveEvent(void)
 {
 	char str[1024];
-	sprintf(str, "%s/event_%d.jpg", SaveFile->fIniDir, Run.thisEventCnt);
+	sprintf(str, "%s/event_%d.jpg", SaveFile->fIniDir, Run.DisplayEvent->EventCnt);
 	fEventCanvas->GetCanvas()->Print(str);	
 }
 
@@ -817,12 +820,39 @@ void dshowMainFrame::Connect2Online(void)
 {
 	PlayFileStop();
 	if (Follow->IsDown()) {
-		Run.iStop = 0;
+		Run.iThreadStop = 0;
 		DataThread = new TThread("DataThread", DataThreadFunction, NULL);
 		DataThread->Run();
 	}
 }
 
+void dshowMainFrame::OnPlayBlocksChanged(void)
+{
+	Run.iPlayBlocks = nPlayBlocks->GetIntNumber();
+}
+
+void dshowMainFrame::ChangeWaveFormPars(void)
+{
+	TThread::Lock();
+	if (rWaveSelf->IsOn()) Run.WaveFormType = WAVE_SELF;
+	if (rWaveTrig->IsOn()) Run.WaveFormType = WAVE_TRIG;
+	if (rWaveHist->IsOn()) Run.WaveFormType = WAVE_HIST;
+	Run.WaveFormChan = 100 * nWFD->GetIntNumber() + nChan->GetIntNumber(); 
+	Run.WaveFormThr = nWaveThreshold->GetIntNumber();
+	TThread::UnLock();
+}
+
+void dshowMainFrame::ChangeDisplayPars(void)
+{
+	TThread::Lock();
+	if (rEvtAll->IsOn()) Run.DisplayType = DISP_ALL;
+	if (rEvtNone->IsOn()) Run.DisplayType = DISP_NONE;
+	if (rEvtVeto->IsOn()) Run.DisplayType = DISP_VETO;
+	if (rEvtPositron->IsOn()) Run.DisplayType = DISP_POSITRON;
+	if (rEvtNeutron->IsOn()) Run.DisplayType = DISP_NEUTRON;
+	Run.DisplayEnergy = nSumEnergyThreshold->GetNumber();
+	TThread::UnLock();	
+}
 
 int ReadConfig(const char *fname)
 {
@@ -852,10 +882,8 @@ int ReadConfig(const char *fname)
 	Conf.SiPmCoef = (config_lookup_float(&cnf, "Dshow.SiPmCoef", &dtmp)) ? dtmp : 1/290.0;
 //	float PmtCoef;
 	Conf.PmtCoef = (config_lookup_float(&cnf, "Dshow.PmtCoef", &dtmp)) ? dtmp : 1/105.0;
-//	float VetoMinA;
-	Conf.VetoMinA = (config_lookup_float(&cnf, "Dshow.VetoMinA", &dtmp)) ? dtmp : 300.0;	// veto single hit minimum amplitude
-//	float VetoMinB;
-	Conf.VetoMinB = (config_lookup_float(&cnf, "Dshow.VetoMinB", &dtmp)) ? dtmp : 50.0;	// veto minimum amplitude for number of hits sum
+//	float VetoMin;
+	Conf.VetoMin = (config_lookup_float(&cnf, "Dshow.VetoMin", &dtmp)) ? dtmp : 300.0;	// veto single hit minimum amplitude
 //	float DVetoMin;
 	Conf.DVetoMin = (config_lookup_float(&cnf, "Dshow.DVetoMin", &dtmp)) ? dtmp : 20.0;	// veto in DANSS, MeV
 //	float SiPmWindow;
@@ -872,11 +900,14 @@ int ReadConfig(const char *fname)
 	Conf.MaxOffClusterEnergy = (config_lookup_float(&cnf, "Dshow.MaxOffClusterEnergy", &dtmp)) ? dtmp : 2.0;
 //	int TimeBThreshold;	// amplitude threshold for TimeB histogram
 	Conf.TimeBThreshold = (config_lookup_int(&cnf, "Dshow.TimeBThreshold", &tmp)) ? tmp : 50;
+//	float FineTimeThreshold;	// fine time calculation
+	Conf.FineTimeThreshold = (config_lookup_float(&cnf, "Dshow.FineTimeThreshold", &dtmp)) ? dtmp : 0.25;
+//	float SmallSiPmAmp;	// small SiPm ~ 1 pixel
+	Conf.SmallSiPmAmp = (config_lookup_float(&cnf, "Dshow.SmallSiPmAmp", &dtmp)) ? dtmp : 0.05;
 //	int ServerPort;			// Out port 0xB230
 	Conf.ServerPort = (config_lookup_int(&cnf, "Sink.Port", &tmp)) ? tmp : 0xB230;
 //	char ServerName[128];		// The server host name
 	strncpy(Conf.ServerName, (config_lookup_string(&cnf, "Sink.Name", (const char **) &stmp)) ? stmp : "dserver.danss.local", sizeof(Conf.ServerName));
-
 
 //		DANSS map	
 	for(i=0; i<MAXWFD; i++) { 
@@ -894,6 +925,7 @@ int ReadConfig(const char *fname)
 		}
 		switch(type) {
 		case TYPE_SIPM:
+			// SiPM map: Z: even - Y, odd - X, Z = 0..99, XY=0..24
 			for (j=0; j<64; j++) Map[i][j].Coef = Conf.SiPmCoef;
 			if (!ptr_xy || !ptr_z) break;
 			for (j=0; j<4; j++) {
@@ -911,6 +943,7 @@ int ReadConfig(const char *fname)
 			}
 			break;
 		case TYPE_PMT:
+			// PMT map: Z: even - Y, odd - X, Z = 0..9, XY=0..4
 			for (j=0; j<64; j++) Map[i][j].Coef = Conf.PmtCoef;
 			if (!ptr_xy || !ptr_z) break;
 			for (j=0; j<64; j++) {
@@ -936,11 +969,43 @@ int ReadConfig(const char *fname)
 int main(int argc, char **argv) 
 {
 	int irc;
+	
+	irc = 100;
+	memset(&Run, 0, sizeof(Run));
+	memset(&Conf, 0, sizeof(Conf));
+	Run.Event = (struct event_struct *) malloc (sizeof(struct event_struct));
+	Run.DisplayEvent = (struct event_struct *) malloc (sizeof(struct event_struct));
+	if (!Run.Event || !Run.DisplayEvent) {
+		printf("FATAL: No memory !\n");
+		return irc;
+	}
+	memset(Run.Event, 0, sizeof(struct event_struct));
+	memset(Run.DisplayEvent, 0, sizeof(struct event_struct));
+	Run.Event->hits = (struct hit_struct *) malloc (sizeof(struct hit_struct) * MAXHITS);
+	Run.DisplayEvent->hits = (struct hit_struct *) malloc (sizeof(struct hit_struct) * MAXHITS);
+	if (!Run.Event->hits || !Run.DisplayEvent->hits) {
+		printf("FATAL: No memory !\n");
+		free(Run.Event);
+		free(Run.DisplayEvent);
+		return irc;
+	}
+
 	irc = ReadConfig((argc > 1) ? argv[1] : DEFCONFIG);
-	if (irc) return irc;
+	if (irc) {
+		free(Run.Event->hits);
+		free(Run.DisplayEvent->hits);
+		free(Run.Event);
+		free(Run.DisplayEvent);
+		return irc;
+	}
    	TApplication theApp("DANSS_SHOW", &argc, argv);
    	dshowMainFrame *frame = new dshowMainFrame(gClient->GetRoot(), 2000, 1000);
    	theApp.Run();
+
+	free(Run.Event->hits);
+	free(Run.DisplayEvent->hits);
+	free(Run.Event);
+	free(Run.DisplayEvent);
    	return 0;
 }
 
