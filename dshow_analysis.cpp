@@ -111,7 +111,7 @@ void ExtractHits(char *data)
 					Run.Event->hits[Run.Event->NHits].chan = chan;
 					Run.Event->hits[Run.Event->NHits].flag = 0;
 				}
-				Run.Event->NHits;
+				Run.Event->NHits++;
 			}
 			break;
 		case TYPE_RAW:
@@ -298,7 +298,7 @@ void CalculateTags(void)
 //	Positron ?
 	if (Run.Event->ClusterEnergy > Conf.PositronMin && Run.Event->ClusterEnergy < Conf.PositronMax && Run.Event->Energy - Run.Event->ClusterEnergy < Conf.MaxOffClusterEnergy ) Run.Event->Flags |= FLAG_POSITRON;
 //	Neutron ?
-	if (Run.Event->Energy > Conf.NeutronMin && Run.Event->ClusterEnergy < Conf.NeutronMax) Run.Event->Flags |= FLAG_NEUTRON;
+	if (Run.Event->Energy > Conf.NeutronMin && Run.Event->Energy < Conf.NeutronMax) Run.Event->Flags |= FLAG_NEUTRON;
 }
 
 void FillHists(void) 
@@ -676,7 +676,7 @@ void Message(const char *msg, ...)
 {
 	va_list ap;
 
-	if (!TThread::TryLock()) return;
+	TThread::Lock();
 	va_start(ap, msg);
 	vsnprintf(Run.msg, sizeof(Run.msg), msg, ap);
 	va_end(ap);

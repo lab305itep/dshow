@@ -24,6 +24,7 @@
 #include <TH2D.h>
 #include <TLegend.h>
 #include <TLine.h>
+#include <TPaveStats.h>
 #include <TROOT.h>
 #include <TRootEmbeddedCanvas.h>
 #include <TString.h>
@@ -319,12 +320,15 @@ void dshowMainFrame::CreateTimeTab(TGTab *tab)
    	hframe->AddFrame(reset, new TGLayoutHints(kLHintsCenterY | kLHintsRight, 5, 5, 3, 4));
 
     	me->AddFrame(hframe, new TGLayoutHints(kLHintsBottom | kLHintsExpandX, 2, 2, 2, 2));
+	fTimeCFit = new TF1("fTimeCFit", "gaus(0)+pol0(3)", -100, 100);
+	fTimeCFit->SetParNames("Const.", "Mean", "Sigma", "Level");
 }
 
 /*	Create event display tab				*/
 void dshowMainFrame::CreateEventTab(TGTab *tab)
 {
 	TGLabel *lb;
+	TGButtonGroup *bg;
 
 	TGCompositeFrame *me = tab->AddTab("Event");
 
@@ -337,18 +341,6 @@ void dshowMainFrame::CreateEventTab(TGTab *tab)
 	save->Connect("Clicked()", "dshowMainFrame", this, "SaveEvent()");
    	hframe->AddFrame(save, new TGLayoutHints(kLHintsCenterY | kLHintsLeft, 5, 5, 3, 4));
 
-	lb = new TGLabel(hframe, "PMT Threshold:");
-   	hframe->AddFrame(lb, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));		
-	nPMTThreshold = new TGNumberEntry(hframe, 0, 5, -1, TGNumberFormat::kNESInteger, TGNumberFormat::kNEANonNegative);
-	nPMTThreshold->SetIntNumber(10);
-   	hframe->AddFrame(nPMTThreshold, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));
-
-	lb = new TGLabel(hframe, "SiPM Threshold:");
-   	hframe->AddFrame(lb, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));		
-	nSiPMThreshold = new TGNumberEntry(hframe, 0, 5, -1, TGNumberFormat::kNESInteger, TGNumberFormat::kNEANonNegative);
-	nSiPMThreshold->SetIntNumber(10);
-   	hframe->AddFrame(nSiPMThreshold, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));
-
 	lb = new TGLabel(hframe, "Sum Energy Threshold:");
    	hframe->AddFrame(lb, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));		
 	nSumEnergyThreshold = new TGNumberEntry(hframe, 0, 5, -1, TGNumberFormat::kNESRealTwo, TGNumberFormat::kNEANonNegative);
@@ -356,7 +348,7 @@ void dshowMainFrame::CreateEventTab(TGTab *tab)
 	nSumEnergyThreshold->Connect("ValueSet(Long_t)", "dshowMainFrame", this, "ChangeDisplayPars()");
    	hframe->AddFrame(nSumEnergyThreshold, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));
 
-	TGButtonGroup *bg = new TGButtonGroup(hframe, "Tagged as", kHorizontalFrame);
+	bg = new TGButtonGroup(hframe, "Tagged as", kHorizontalFrame);
 	rEvtAll      = new TGRadioButton(bg, "&Any       ");
 	rEvtNone     = new TGRadioButton(bg, "&None      ");
 	rEvtVeto     = new TGRadioButton(bg, "&Veto      ");
@@ -368,6 +360,13 @@ void dshowMainFrame::CreateEventTab(TGTab *tab)
 	rEvtVeto->Connect("Clicked()", "dshowMainFrame", this, "ChangeDisplayPars()");
 	rEvtPositron->Connect("Clicked()", "dshowMainFrame", this, "ChangeDisplayPars()");
 	rEvtNeutron->Connect("Clicked()", "dshowMainFrame", this, "ChangeDisplayPars()");
+   	hframe->AddFrame(bg, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));
+
+	bg = new TGButtonGroup(hframe, "SiPM hits", kHorizontalFrame);
+	rHitAll      = new TGRadioButton(bg, "&All       ");
+	rHitClean    = new TGRadioButton(bg, "&Clean     ");
+	rHitCluster  = new TGRadioButton(bg, "C&luster   ");
+	rHitAll->SetState(kButtonDown);
    	hframe->AddFrame(bg, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));
 
     	me->AddFrame(hframe, new TGLayoutHints(kLHintsBottom | kLHintsExpandX, 2, 2, 2, 2));
@@ -407,7 +406,7 @@ void dshowMainFrame::InitHist(void)
 		snprintf(strl, sizeof(strl), "Module %2.2d: time versus channels number relative to common SiPM time, amplitude above threshold", i+1);
 		Run.hTimeC[i] = new TH2D(strs, strl, 64, 0, 64, 400, -200, 200);
 	}
-	Run.DisplayEvent = NULL;
+	Run.DisplayEvent->NHits = 0;
 }
 
 
@@ -427,6 +426,7 @@ void dshowMainFrame::DoDraw(void)
 {
 	char str[1024];
    	TCanvas *fCanvas;
+	TPaveStats *stat;
    	TText txt;
    	TLine ln;
 	int mod, chan;
@@ -539,18 +539,35 @@ void dshowMainFrame::DoDraw(void)
 		hProj = Run.hTimeC[mod]->ProjectionY("_py", chan + 1, chan + 1);
 	}
 	hProj->SetTitle(str);
+	h = hProj->GetMaximum();
 	if (hProj->Integral() > 1.0) {
-		hProj->Fit("gaus", "Q");
+		if (Map[mod][0].type == TYPE_SIPM) {
+			fTimeCFit->SetParameters(h, 0, 5, 0);
+			hProj->Fit("fTimeCFit", "Q", "", -2*Conf.SiPmWindow, 2*Conf.SiPmWindow);
+		} else {
+			hProj->Fit("gaus", "Q");
+		}
 	} else {
 		hProj->Draw();
 	}
-	h = hProj->GetMaximum() / 2;
 	if (Map[mod][0].type == TYPE_SIPM) {
 		ln.SetLineColor(kRed);
 		ln.SetLineWidth(2);
-		ln.DrawLine(-Conf.SiPmWindow, 0, -Conf.SiPmWindow, h);
-		ln.DrawLine( Conf.SiPmWindow, 0,  Conf.SiPmWindow, h);
+		ln.DrawLine(-Conf.SiPmWindow, 0, -Conf.SiPmWindow, h/2);
+		ln.DrawLine( Conf.SiPmWindow, 0,  Conf.SiPmWindow, h/2);
 	}
+	ln.SetLineColor(kGreen);
+	ln.SetLineWidth(2);
+	ln.DrawLine(0, 0, 0, h);
+	stat = (TPaveStats *) hProj->FindObject("stats");
+	if (stat) {
+		stat->SetX1NDC(0.6);
+		stat->SetX2NDC(0.95);
+		stat->SetY1NDC(0.75);
+		stat->SetY2NDC(0.93);
+//		stat->Draw();
+	}
+
    	fCanvas->Update();
 
 /*		Event display			*/
@@ -576,7 +593,7 @@ void dshowMainFrame::DrawEvent(TCanvas *cv)
 	TGaxis ax;
 	TText txt;
 	int i, j, k, n;
-	int thSiPM, thPMT;
+	int cl;
 	const struct vpos_struct {
 		double x1;
 		double y1;
@@ -586,9 +603,9 @@ void dshowMainFrame::DrawEvent(TCanvas *cv)
 //		Top
 		{0.51, 0.94, 0.63, 0.96}, {0.51, 0.91, 0.63, 0.93}, {0.63, 0.94, 0.75, 0.96}, {0.63, 0.91, 0.75, 0.93}, 
 		{0.75, 0.94, 0.87, 0.96}, {0.75, 0.91, 0.87, 0.93}, {0.87, 0.94, 0.99, 0.96}, {0.87, 0.91, 0.99, 0.93}, 
-//		Reserved
-		{-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0},
-		{-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0},
+//		Corners
+		{0.45, 0.97, 0.48, 0.98}, {0.48, 0.95, 0.49, 0.98}, {-1.0, -1.0, -1.0, -1.0}, {0.45, 0.91, 0.48, 0.92},
+		{0.02, 0.91, 0.05, 0.92}, {0.01, 0.91, 0.02, 0.94}, {0.01, 0.95, 0.02, 0.98}, {0.02, 0.97, 0.05, 0.98},
 //		Outer front X, back closer to the cube
 		{0.475, 0.1, 0.48, 0.9}, {0.48, 0.1, 0.485, 0.9}, {0.485, 0.1, 0.49, 0.9},
 //		Outer front Y, back closer to the cube
@@ -606,7 +623,7 @@ void dshowMainFrame::DrawEvent(TCanvas *cv)
 //		Inner back Y, back closer to the cube
 		{0.955, 0.1, 0.96, 0.9}, {0.96, 0.1, 0.965, 0.9}, {0.965, 0.1, 0.97, 0.9},
 //		Reserved
-		{-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0},
+		{0.48, 0.91, 0.49, 0.94}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0},
 		{-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0},
 		{-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0},
 		{-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0}, {-1.0, -1.0, -1.0, -1.0},
@@ -632,30 +649,36 @@ void dshowMainFrame::DrawEvent(TCanvas *cv)
 	for (i=0; i<64; i++) if (vpos[i].x1 >= 0) SipmBox.DrawBox(vpos[i].x1, vpos[i].y1, vpos[i].x2, vpos[i].y2);
 
 //		Draw Hits in PMT
-	thPMT = nPMTThreshold->GetIntNumber();
-	thSiPM = nSiPMThreshold->GetIntNumber();
 	PmtBox.SetLineWidth(5);
-	for (n=0; n<Run.DisplayEvent->NHits; n++) if (Run.DisplayEvent->hits[n].type == TYPE_PMT && Run.DisplayEvent->hits[n].energy > thPMT && Run.DisplayEvent->hits[n].flag >= 0) {
+	for (n=0; n<Run.DisplayEvent->NHits; n++) if (Run.DisplayEvent->hits[n].type == TYPE_PMT) {
 		i = Run.DisplayEvent->hits[n].xy;
 		j = Run.DisplayEvent->hits[n].z / 2;
 		k = Run.DisplayEvent->hits[n].z & 1;
 		if (!k) i = 4 - i;
-		PmtBox.SetLineColor(PaletteStart + Run.DisplayEvent->hits[n].energy*MAXRGB/MAXADC);
+		cl = Run.DisplayEvent->hits[n].energy*MAXRGB/MAXPMT;
+		if (cl > MAXRGB - 1) cl = MAXRGB - 1;
+		PmtBox.SetLineColor(PaletteStart + cl);
 		PmtBox.DrawBox(0.05 + 0.5*k + 0.08*i, 0.1 + 0.16*j, 0.13 + 0.5*k + 0.08*i, 0.26 +0.16*j);
 	}
 //		Draw Hits in SiPM
 	SipmBox.SetFillStyle(1000);
-	for (n=0; n<Run.DisplayEvent->NHits; n++) if (Run.DisplayEvent->hits[n].type == TYPE_SIPM && Run.DisplayEvent->hits[n].energy > thSiPM) {
+	for (n=0; n<Run.DisplayEvent->NHits; n++) if (Run.DisplayEvent->hits[n].type == TYPE_SIPM) {
+		if (rHitCluster->IsOn() && Run.DisplayEvent->hits[n].flag < 10) continue;
+		if (rHitClean->IsOn() && Run.DisplayEvent->hits[n].flag < 0) continue;
 		i = Run.DisplayEvent->hits[n].xy;
 		j = Run.DisplayEvent->hits[n].z / 2;
 		k = Run.DisplayEvent->hits[n].z & 1;
 		if (!k) i = 24 - i;
-		SipmBox.SetFillColor(PaletteStart + Run.DisplayEvent->hits[n].energy*MAXRGB/MAXADC);
+		cl = Run.DisplayEvent->hits[n].energy*MAXRGB/MAXSIPM;
+		if (cl > MAXRGB - 1) cl = MAXRGB - 1;
+		SipmBox.SetFillColor(PaletteStart + cl);
 		SipmBox.DrawBox(0.05 + 0.5*k + 0.016*i, 0.1 + 0.008*k + 0.016*j, 0.066 + 0.5*k + 0.016*i, 0.108 + 0.008*k + 0.016*j);
 	}
 //		Draw Hits in VETO
-	for (n=0; n<Run.DisplayEvent->NHits; n++) if (Run.DisplayEvent->hits[n].type == TYPE_VETO && Run.DisplayEvent->hits[n].energy > thPMT) {
-		SipmBox.SetFillColor(PaletteStart + Run.DisplayEvent->hits[n].energy*MAXRGB/MAXADC);
+	for (n=0; n<Run.DisplayEvent->NHits; n++) if (Run.DisplayEvent->hits[n].type == TYPE_VETO) {
+		cl = Run.DisplayEvent->hits[n].energy*MAXRGB/MAXADC;
+		if (cl > MAXRGB - 1) cl = MAXRGB - 1;
+		SipmBox.SetFillColor(PaletteStart + cl);
 		i = Run.DisplayEvent->hits[n].xy;
 		if (vpos[i].x1 < 0) continue;
 		SipmBox.DrawBox(vpos[i].x1, vpos[i].y1, vpos[i].x2, vpos[i].y2);
@@ -670,7 +693,7 @@ void dshowMainFrame::DrawEvent(TCanvas *cv)
 //		Draw TAG
 	str[0] = '\0';
 	for (i=0; i<sizeof(tagname) / sizeof(tagname[0]); i++) if (Run.DisplayEvent->Flags & (1 << i)) strcat(str, tagname[i]);
-	txt.DrawText(0.2, 0.95, str);
+	txt.DrawText(0.07, 0.95, str);
 
 	Run.DisplayEvent->NHits = 0;
 }
@@ -862,7 +885,7 @@ int ReadConfig(const char *fname)
 #else
 	long tmp;
 #endif
-	double dtmp;
+	double dtmp, T0;
 	char *stmp;
 	int i, j, k, type, xy, z;
 	config_setting_t *ptr_xy;
@@ -914,6 +937,8 @@ int ReadConfig(const char *fname)
 	//	int Type;
 		sprintf(str, "Map.Dev%3.3d.Type", i+1);
 		type = (config_lookup_int(&cnf, str, &tmp)) ? tmp : -1;
+		sprintf(str, "Map.Dev%3.3d.T0", i+1);
+		T0 = (config_lookup_float(&cnf, str, &dtmp)) ? dtmp : 0.0;
 		if (type < 0) continue;
 		sprintf(str, "Map.Dev%3.3d.XY", i+1);
 		ptr_xy = config_lookup(&cnf, str);
@@ -921,7 +946,7 @@ int ReadConfig(const char *fname)
 		ptr_z = config_lookup(&cnf, str);
 		for (j=0; j<64; j++) {
 			Map[i][j].type = type;
-			Map[i][j].T0 = 0;
+			Map[i][j].T0 = T0;
 		}
 		switch(type) {
 		case TYPE_SIPM:

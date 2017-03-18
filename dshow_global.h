@@ -5,6 +5,8 @@
 #define DEFCONFIG	"dshow.conf"
 #define MAXADC	4096
 #define MAXRGB	128
+#define MAXPMT  30.0
+#define MAXSIPM 10.0
 //	Strip sizes in cm
 #define WIDTH	4.0
 #define THICK	1.0

@@ -1,6 +1,7 @@
 #include <TGFrame.h>
 
 class TCanvas;
+class TF1;
 class TGCheckButton;
 class TGDoubleHSlider;
 class TGFileInfo;
@@ -45,16 +46,18 @@ private:
 	TGRadioButton *rTimeSingle;
 	TGNumberEntry *nSiPMWindow;
 	TLegend *TimeLegend;
+	TF1 *fTimeCFit;
 //		Event display tab
 	TRootEmbeddedCanvas *fEventCanvas;
-	TGNumberEntry *nPMTThreshold;
-	TGNumberEntry *nSiPMThreshold;
 	TGNumberEntry *nSumEnergyThreshold;
 	TGRadioButton *rEvtAll;
 	TGRadioButton *rEvtNone;
 	TGRadioButton *rEvtVeto;
 	TGRadioButton *rEvtNeutron;
 	TGRadioButton *rEvtPositron;
+	TGRadioButton *rHitAll;
+	TGRadioButton *rHitClean;
+	TGRadioButton *rHitCluster;
 	int PaletteStart;
 //		Rate tab
 	TRootEmbeddedCanvas *fRateCanvas;
