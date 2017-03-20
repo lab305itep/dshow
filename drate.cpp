@@ -97,6 +97,8 @@ void Drate::Push(long long gTime, int uTime, int IsMe)	// push and event at time
 				ptrL++;
 			}
 			cntL = 0;
+			tmSum = 0;
+			cntLS = 0;
 		}
 		cntS = 0;
 	}
