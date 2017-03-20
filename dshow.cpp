@@ -215,6 +215,7 @@ dshowMainFrame::~dshowMainFrame(void)
 	Run.iThreadStop = 1;
 	delete OneSecond;
 	if (DataThread) DataThread->Join();
+	DataThread = NULL;
 	Cleanup();
 //		all memory will be freed without us anyway...
 }
@@ -222,6 +223,9 @@ dshowMainFrame::~dshowMainFrame(void)
 /*	When main window is closed			*/
 void dshowMainFrame::CloseWindow(void)
 {
+	Run.iThreadStop = 1;
+	if (DataThread) DataThread->Join();
+	DataThread = NULL;
 	gApplication->Terminate(0);
 }
 
