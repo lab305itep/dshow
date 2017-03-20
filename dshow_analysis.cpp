@@ -45,6 +45,7 @@
 #include <unistd.h>
 #include "recformat.h"
 #include "dshow_global.h"
+#include "drate.h"
 
 /*	Process event data - get hits and parameters		*/
 void ExtractHits(char *data)
@@ -64,6 +65,7 @@ void ExtractHits(char *data)
 	Run.Event->EventCnt = Run.EventCnt;
 /*		Get records	*/
 	head = (struct rec_header_struct *)data;
+	Run.Event->uTime = head->time;
 	for (iptr = sizeof(struct rec_header_struct); iptr < head->len; iptr += len) {		// record by record
 		rec = (struct hw_rec_struct *) &data[iptr];
 		len = (rec->len + 1) * sizeof(short);
@@ -98,7 +100,7 @@ void ExtractHits(char *data)
 			if (amp >= MINAMP) Run.hTimeA[mod-1]->Fill((double)chan, t);
 			if (amp > Conf.TimeBThreshold) Run.hTimeB[mod-1]->Fill((double)chan, t);
 //			Add hit to event structure
-			if (Map[mod-1][chan].type >= 0 && amp >= MINAMP) {
+			if (Map[mod-1][chan].type >= 0 && amp >= MINAMP && Map[mod-1][chan].xy >= 0) {
 				if (Run.Event->NHits >= MAXHITS) {
 					Log("Too many hits %d > %d\n", Run.Event->NHits, MAXHITS);
 				} else {
@@ -167,6 +169,7 @@ void FineTimeAnalysis(void)
 		if (nSum > 1) for (i = 0; i<Run.Event->NHits; i++) Run.hTimeC[Run.Event->hits[i].mod - 1]->Fill((double) Run.Event->hits[i].chan, Run.Event->hits[i].time - at);
 		for (i = 0; i<Run.Event->NHits; i++) if (fabs(Run.Event->hits[i].time - at) > Conf.SiPmWindow && Run.Event->hits[i].type == TYPE_SIPM) Run.Event->hits[i].flag = -10;	// clean by time
 	} else {
+		for (i = 0; i<Run.Event->NHits; i++) if (Run.Event->hits[i].type == TYPE_SIPM) Run.Event->hits[i].flag = -10;	// clean by NO time
 		Run.Event->Flags |= FLAG_NOFINETIME;
 	}
 }
@@ -294,7 +297,7 @@ void CalculateParameters(void)
 void CalculateTags(void)
 {
 //	Veto ?
-	if (Run.Event->VetoEnergy > Conf.VetoMin || Run.Event->VetoHits > 1 || Run.Event->Energy > Conf.DVetoMin) Run.Event->Flags |= FLAG_VETO;
+	if (Run.Event->VetoEnergy > Conf.VetoMin || Run.Event->VetoHits > 1) Run.Event->Flags |= FLAG_VETO;
 //	Positron ?
 	if (Run.Event->ClusterEnergy > Conf.PositronMin && Run.Event->ClusterEnergy < Conf.PositronMax && Run.Event->Energy - Run.Event->ClusterEnergy < Conf.MaxOffClusterEnergy ) Run.Event->Flags |= FLAG_POSITRON;
 //	Neutron ?
@@ -303,7 +306,13 @@ void CalculateTags(void)
 
 void FillHists(void) 
 {
-	;	// nothing rithg now - to be add
+//	Calculate rates
+	Run.Rates[0]->Push(Run.Event->gTime, Run.Event->uTime, 1);	// count triggers
+	Run.Rates[1]->Push(Run.Event->gTime, Run.Event->uTime, Run.Event->Flags & FLAG_VETO);	// count VETO counters
+	Run.Rates[2]->Push(Run.Event->gTime, Run.Event->uTime, Run.Event->Flags & FLAG_POSITRON);	// count positrons
+	Run.Rates[3]->Push(Run.Event->gTime, Run.Event->uTime, Run.Event->Flags & FLAG_NEUTRON);	// count neutrons
+	Run.Rates[4]->Push(Run.Event->gTime, Run.Event->uTime, Run.Event->Energy > Conf.DVetoMin);	// count Danss > 20 MeV
+	Run.Rates[5]->Push(Run.Event->gTime, Run.Event->uTime, (Run.Event->Energy > Conf.DVetoMin) && !(Run.Event->Flags & FLAG_VETO));	// count VETO misses
 }
 
 void Event2Draw(void)

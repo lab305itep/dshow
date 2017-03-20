@@ -11,7 +11,10 @@ class TGHProgressBar;
 class TGRadioButton;
 class TGStatusBar;
 class TGTab;
+class TGraph;
+class TH1D;
 class TLegend;
+class TPad;
 class TRootEmbeddedCanvas;
 class TThread;
 class TTimer;
@@ -61,6 +64,14 @@ private:
 	int PaletteStart;
 //		Rate tab
 	TRootEmbeddedCanvas *fRateCanvas;
+	TGRadioButton *rRateFast;
+	TGRadioButton *rRateMedium;
+	TGRadioButton *rRateSlow;
+	TH1D *hRateTemplate[2];
+	TGraph *gRateGraph[6];
+	TF1 *fRateFit[2][6];
+	TLegend *RateLegend;
+	TPad *pdRate[2];
 //		Right buttons
 	TGCheckButton *Pause;
 	TGNumberEntry *nRefresh;

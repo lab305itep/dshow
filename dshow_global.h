@@ -5,7 +5,7 @@
 #define DEFCONFIG	"dshow.conf"
 #define MAXADC	4096
 #define MAXRGB	128
-#define MAXPMT  30.0
+#define MAXPMT  50.0
 #define MAXSIPM 10.0
 //	Strip sizes in cm
 #define WIDTH	4.0
@@ -15,6 +15,7 @@
 
 class TH1D;
 class TH2D;
+class Drate;
 
 struct hw_rec_struct_self;
 
@@ -31,6 +32,7 @@ struct hit_struct {
 
 struct event_struct {
 	long long gTime;
+	int uTime;
 	int gTrig;
 	float Energy;
 	float ClusterEnergy;
@@ -69,6 +71,7 @@ struct common_data_struct {
 	TH2D *hTimeA[MAXWFD];	// time versus channel - events, no threshold
 	TH2D *hTimeB[MAXWFD];	// time versus channel - events, with fixed threshold
 	TH2D *hTimeC[MAXWFD];	// channel time - common SiPM time, TimeB thresholds
+	Drate *Rates[6];	// Frequency meters
 //		Events
 	struct event_struct *DisplayEvent;	// selected event for display
 	volatile int DisplayType;

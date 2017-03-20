@@ -3,7 +3,7 @@ ROOTCINT=rootcint
 
 all : dshow danal1 danal2
 
-dshow : dshow.cpp dshowDict.cpp dshow_analysis.cpp
+dshow : dshow.cpp dshowDict.cpp dshow_analysis.cpp drate.cpp
 	g++ -g -o $@ $^ `root-config --cflags --glibs` -lconfig
 
 dshowDict.cpp : dshowLinkDef.h dshow.h

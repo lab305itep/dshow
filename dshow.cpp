@@ -22,6 +22,7 @@
 #include <TGTab.h>
 #include <TGraph.h>
 #include <TH2D.h>
+#include <TLatex.h>
 #include <TLegend.h>
 #include <TLine.h>
 #include <TPaveStats.h>
@@ -46,6 +47,7 @@
 #include "dshow.h"
 #include "recformat.h"
 #include "dshow_global.h"
+#include "drate.h"
 
 const char *DataFileTypes[] = {"Data files", "*.dat*", "All files", "*", 0, 0};
 const char *SaveFileTypes[] = {"Root files", "*.root", "PDF", "*.pdf", "PostScript", "*.ps", "JPEG", "*.jpg", "GIF", "*.gif", "PNG", "*.png", "All files", "*", 0, 0};
@@ -61,9 +63,9 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h) : TGMainFr
 	char strs[64];
 	char strl[1024];
 	Int_t StatusBarParts[] = {10, 10, 10, 10, 10, 50};	// status bar parts
-	Double_t RGB_r[]    = {0., 0.0, 1.0, 1.0, 1.0};
+	Double_t RGB_r[]    = {0., 0.0, 1.0, 0.0, 1.0};
    	Double_t RGB_g[]    = {0., 0.0, 0.0, 1.0, 1.0};
-   	Double_t RGB_b[]    = {0., 1.0, 0.0, 0.0, 1.0};
+   	Double_t RGB_b[]    = {0., 1.0, 0.0, 0.0, 0.0};
    	Double_t RGB_stop[] = {0., .25, .50, .75, 1.0};
 	int i, n;
 	TGLabel *lb;
@@ -375,10 +377,46 @@ void dshowMainFrame::CreateEventTab(TGTab *tab)
 /*	Create event rate tab				*/
 void dshowMainFrame::CreateRateTab(TGTab *tab)
 {
+	int i, j;
+	char str[128];
+	const Color_t rateColor[6] = {kRed, kGreen, kBlue, kOrange, kCyan+4, kBlack};
+	
 	TGCompositeFrame *me = tab->AddTab("Rates");
 
 	fRateCanvas = new TRootEmbeddedCanvas ("RateCanvas", me, 1600, 800);
    	me->AddFrame(fRateCanvas, new TGLayoutHints(kLHintsExpandX | kLHintsExpandY, 10, 10, 10, 1));
+
+   	TGHorizontalFrame *hframe=new TGHorizontalFrame(me);
+
+	TGButtonGroup *bg = new TGButtonGroup(hframe, "Rate range", kHorizontalFrame);
+	rRateFast      = new TGRadioButton(bg, "100-&2000  ");
+	rRateMedium    = new TGRadioButton(bg, "&4-200     ");
+	rRateSlow      = new TGRadioButton(bg, "&0-5       ");
+	rRateFast->SetState(kButtonDown);
+   	hframe->AddFrame(bg, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));
+    	me->AddFrame(hframe, new TGLayoutHints(kLHintsBottom | kLHintsExpandX, 2, 2, 2, 2));
+
+	hRateTemplate[0] = new TH1D("hRateTemplateA", "Trigger rates;;Hz", 10,  0, 5000);
+	hRateTemplate[1] = new TH1D("hRateTemplateB", "", 10,  0, 5000);
+	for (i=0; i<2; i++) {	
+		hRateTemplate[i]->SetMinimum(0);
+		hRateTemplate[i]->SetMaximum(2000);
+		hRateTemplate[i]->GetXaxis()->SetTimeDisplay(1);
+		hRateTemplate[i]->GetXaxis()->SetTimeOffset(0);
+		hRateTemplate[i]->SetStats(0);
+	}
+	hRateTemplate[0]->GetXaxis()->SetNdivisions(605);
+	hRateTemplate[1]->GetXaxis()->SetNdivisions(504);
+	hRateTemplate[0]->GetXaxis()->SetTimeFormat("%d-%b %H:%M");
+	hRateTemplate[1]->GetXaxis()->SetTimeFormat("%H:%M");
+	RateLegend = new TLegend(0.35, 0.85, 0.75, 0.99);
+	for (j=0; j<2; j++) for (i=0; i<6; i++) {
+		sprintf(str, "fRateFit%d%d", j, i);
+		fRateFit[j][i] = new TF1(str, "pol0");
+		fRateFit[j][i]->SetLineColor(rateColor[i]);
+	}
+	memset(gRateGraph, 0, sizeof(gRateGraph));
+	memset(pdRate, 0, sizeof(pdRate));
 }
 
 /*	Create histogramms						*/
@@ -406,6 +444,12 @@ void dshowMainFrame::InitHist(void)
 		snprintf(strl, sizeof(strl), "Module %2.2d: time versus channels number relative to common SiPM time, amplitude above threshold", i+1);
 		Run.hTimeC[i] = new TH2D(strs, strl, 64, 0, 64, 400, -200, 200);
 	}
+	Run.Rates[0] = new Drate(5L*1.0E9/NSPERCHAN, 40000);
+	Run.Rates[1] = new Drate(5L*1.0E9/NSPERCHAN, 40000);
+	Run.Rates[2] = new Drate(10L*1.0E9/NSPERCHAN, 20000);
+	Run.Rates[3] = new Drate(10L*1.0E9/NSPERCHAN, 20000);
+	Run.Rates[4] = new Drate(10L*1.0E9/NSPERCHAN, 20000);
+	Run.Rates[5] = new Drate(100L*1.0E9/NSPERCHAN, 2000);
 	Run.DisplayEvent->NHits = 0;
 }
 
@@ -427,12 +471,16 @@ void dshowMainFrame::DoDraw(void)
 	char str[1024];
    	TCanvas *fCanvas;
 	TPaveStats *stat;
-   	TText txt;
+   	TLatex txt;
    	TLine ln;
 	int mod, chan;
 	int i, j;
 	double h;
 	TH1D *hProj;
+	const char rateName[6][20] = {"Trigger", "VETO", "Positrons", "Neutrons", ">20 MeV", ">20 MeV & !VETO"};
+	const int rateMarker[6] = {20, 21, 22, 23, 24, 25};
+	const Color_t rateColor[6] = {kRed, kGreen, kBlue, kOrange, kCyan+4, kBlack};
+	double tm;
 
 	mod = nWFD->GetIntNumber() - 1;
 	chan = nChan->GetIntNumber();
@@ -580,6 +628,68 @@ void dshowMainFrame::DoDraw(void)
    	fCanvas = fRateCanvas->GetCanvas();
    	fCanvas->cd();
 	fCanvas->Clear();
+	tm = time(NULL);
+	hRateTemplate[0]->SetBins(10, tm - 200000, tm);
+	hRateTemplate[1]->SetBins(10, tm - 1800, tm);
+	RateLegend->Clear();
+	for (i=0; i<6; i++) {
+		if (gRateGraph[i]) delete gRateGraph[i];
+		gRateGraph[i] = Run.Rates[i]->GetGraph();
+		if (!gRateGraph[i]) continue;
+		gRateGraph[i]->SetMarkerStyle(rateMarker[i]);
+		gRateGraph[i]->SetMarkerColor(rateColor[i]);
+	}
+	if (rRateFast->IsDown()) {
+		for (i=0; i<2; i++) {
+			hRateTemplate[i]->SetMinimum(100);
+			hRateTemplate[i]->SetMaximum(2000);
+		}
+		for (j=0; j<2; j++) if (gRateGraph[j]) {
+			sprintf(str, "%16s: %6.1f Hz", rateName[j], Run.Rates[j]->GetLast());
+			RateLegend->AddEntry(gRateGraph[j], str, "P");
+		}
+	} else if (rRateMedium->IsDown()) {
+		for (i=0; i<2; i++) {
+			hRateTemplate[i]->SetMinimum(5);
+			hRateTemplate[i]->SetMaximum(200);
+		}
+		for (j=2; j<5; j++) if (gRateGraph[j]) {
+			sprintf(str, "%16s: %6.1f Hz", rateName[j], Run.Rates[j]->GetLast());
+			RateLegend->AddEntry(gRateGraph[j], str, "P");
+		}
+	} else {
+		for (i=0; i<2; i++) {
+			hRateTemplate[i]->SetMinimum(0);
+			hRateTemplate[i]->SetMaximum(5);
+		}
+		for (j=5; j<6; j++) if (gRateGraph[j]) {
+			sprintf(str, "%16s: %6.1f Hz", rateName[j], Run.Rates[j]->GetLast());
+			RateLegend->AddEntry(gRateGraph[j], str, "P");
+		}
+	}
+	
+	for (j=0; j<2; j++) {
+		fCanvas->cd();
+		pdRate[j] = new TPad((j) ? "pdRateB" : "pdRateA", "", 0 + 0.7*j, 0, 0.7 + 0.3*j, 1.0);
+		pdRate[j]->Draw();
+		pdRate[j]->cd();
+		pdRate[j]->SetRightMargin(0.02);
+
+		hRateTemplate[j]->Draw();
+		stat = (TPaveStats *) hRateTemplate[j]->FindObject("stats");
+		if (stat) stat->SetOptFit(0);
+
+		for (i=0; i<6; i++) if (gRateGraph[i]) {
+			gRateGraph[i]->Draw("P");
+//			gRateGraph[i]->Fit(fRateFit[j][i], "Q");
+//			txt.SetTextColor(rateColor[i]);
+//			sprintf(str, "%16s: %6.1f #pm %6.1f [%6.1f] Hz", rateName[j], fRateFit[j][i]->GetParameter(0), 
+//				fRateFit[j][i]->GetParError(0), Run.Rates[j]->GetLast());
+//			txt.DrawLatex(1.05*fRateFit[j][i]->GetParameter(0), hRateTemplate[j]->GetBinCenter(3), str);
+		}
+		if (!j) RateLegend->Draw();
+	}
+	
    	fCanvas->Update();
 
 	TThread::UnLock();
