@@ -64,14 +64,17 @@ private:
 	int PaletteStart;
 //		Rate tab
 	TRootEmbeddedCanvas *fRateCanvas;
-	TGRadioButton *rRateFast;
-	TGRadioButton *rRateMedium;
-	TGRadioButton *rRateSlow;
+	TGRadioButton *rRateRange[4];
 	TH1D *hRateTemplate[2];
-	TGraph *gRateGraph[6];
-	TF1 *fRateFit[2][6];
+	TGraph *gRateGraph[2][7];
 	TLegend *RateLegend;
 	TPad *pdRate[2];
+//		SiPM tab
+	TRootEmbeddedCanvas *fSiPmCanvas;
+//		PMT tab
+	TRootEmbeddedCanvas *fPmtCanvas;
+//		XY tab
+	TRootEmbeddedCanvas *fXYZCanvas;
 //		Right buttons
 	TGCheckButton *Pause;
 	TGNumberEntry *nRefresh;
@@ -90,6 +93,9 @@ private:
 	void CreateTimeTab(TGTab *tab);
 	void CreateEventTab(TGTab *tab);
 	void CreateRateTab(TGTab *tab);
+	void CreateSiPmTab(TGTab *tab);
+	void CreatePmtTab(TGTab *tab);
+	void CreateXYZTab(TGTab *tab);
 	void DrawEvent(TCanvas *cv);
 	void InitHist(void); 
 public:
@@ -101,6 +107,9 @@ public:
 	void ResetSelfHists(void);
 	void ResetSpectrumHists(void);
 	void ResetTimeHists(void);
+	void ResetSiPmHists(void);
+	void ResetPmtHists(void);
+	void ResetXYZHists(void);
 	void OnPlayBlocksChanged(void);
 	void ChangeWaveFormPars(void);
 	void ChangeDisplayPars(void);

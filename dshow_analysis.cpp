@@ -306,13 +306,50 @@ void CalculateTags(void)
 
 void FillHists(void) 
 {
+	int xy, z;
+	int i;
+
 //	Calculate rates
 	Run.Rates[0]->Push(Run.Event->gTime, Run.Event->uTime, 1);	// count triggers
-	Run.Rates[1]->Push(Run.Event->gTime, Run.Event->uTime, Run.Event->Flags & FLAG_VETO);	// count VETO counters
-	Run.Rates[2]->Push(Run.Event->gTime, Run.Event->uTime, Run.Event->Flags & FLAG_POSITRON);	// count positrons
-	Run.Rates[3]->Push(Run.Event->gTime, Run.Event->uTime, Run.Event->Flags & FLAG_NEUTRON);	// count neutrons
-	Run.Rates[4]->Push(Run.Event->gTime, Run.Event->uTime, Run.Event->Energy > Conf.DVetoMin);	// count Danss > 20 MeV
-	Run.Rates[5]->Push(Run.Event->gTime, Run.Event->uTime, (Run.Event->Energy > Conf.DVetoMin) && !(Run.Event->Flags & FLAG_VETO));	// count VETO misses
+	Run.Rates[1]->Push(Run.Event->gTime, Run.Event->uTime, (Run.Event->Flags & FLAG_VETO) ? 1 : 0);	// count VETO counters
+	Run.Rates[2]->Push(Run.Event->gTime, Run.Event->uTime, (Run.Event->Flags & FLAG_POSITRON) ? 1 : 0);	// count positrons
+	Run.Rates[3]->Push(Run.Event->gTime, Run.Event->uTime, (Run.Event->Flags & FLAG_NEUTRON) ? 1 : 0);	// count neutrons
+	Run.Rates[4]->Push(Run.Event->gTime, Run.Event->uTime, (Run.Event->Energy > Conf.DVetoMin) ? 1 : 0);	// count Danss > 20 MeV
+	Run.Rates[5]->Push(Run.Event->gTime, Run.Event->uTime, ((Run.Event->Energy > Conf.DVetoMin) && !(Run.Event->Flags & FLAG_VETO)) ? 1 : 0);	// count VETO misses
+	Run.Rates[6]->Push(Run.Event->gTime, Run.Event->uTime, Run.SelfTriggerCnt);	// self triggers
+	Run.SelfTriggerCnt = 0;
+//	XYZ
+	if ((Run.Event->Flags & FLAG_POSITRON) && !(Run.Event->Flags & FLAG_VETO)) {
+		if (Run.Event->VertexP[0] >= 0 && Run.Event->VertexP[1] >= 0) Run.hXYPositron->Fill(Run.Event->VertexP[0] + 2., Run.Event->VertexP[1] + 2.);
+		if (Run.Event->VertexP[2] >= 0) Run.hZPositron->Fill(Run.Event->VertexP[2] + 0.5);
+	}
+	if ((Run.Event->Flags & FLAG_NEUTRON) && !(Run.Event->Flags & FLAG_VETO)) {
+		if (Run.Event->VertexN[0] >= 0 && Run.Event->VertexN[1] >= 0) Run.hXYNeutron->Fill(Run.Event->VertexN[0] + 2., Run.Event->VertexN[1] + 2.);
+		if (Run.Event->VertexN[2] >= 0) Run.hZNeutron->Fill(Run.Event->VertexN[2] + 0.5);
+	}
+	for (i = 0; i<Run.Event->NHits; i++) if (Run.Event->hits[i].flag >= 0) {
+		xy = Run.Event->hits[i].xy;
+		z = Run.Event->hits[i].z;
+		switch(Run.Event->hits[i].type) {
+		case TYPE_SIPM:
+			if (z & 1) {	// X
+				Run.hSiPmTrigXZ->Fill(xy+0.5, (z/2) + 0.5);
+			} else {	// Y
+				Run.hSiPmTrigYZ->Fill(24-xy+0.5, (z/2) + 0.5);
+			}
+			break;
+		case TYPE_PMT:
+			if (z & 1) {	// X
+				Run.hPmtTrigXZ->Fill(xy+0.5, (z/2) + 0.5);
+			} else {	// Y
+				Run.hPmtTrigYZ->Fill(4-xy+0.5, (z/2) + 0.5);
+			}
+			break;
+		case TYPE_VETO:
+			Run.hVetoHits->Fill(xy+0.5);
+			break;
+		}
+	}
 }
 
 void Event2Draw(void)
@@ -359,6 +396,7 @@ void ProcessSelfTrig(int mod, int chan, struct hw_rec_struct_self *data)
 {
 	int i, amp;
 	char strl[1024];
+	int xy, z;
 
 //	Extend sign
 	for (i = 0; i < data->len - 2; i++) if (data->d[i] & 0x4000) data->d[i] |= 0x8000;
@@ -371,6 +409,17 @@ void ProcessSelfTrig(int mod, int chan, struct hw_rec_struct_self *data)
 	}
 //	WFD->MAX(Chan) (self)
 	Run.hAmpS[mod-1]->Fill((double)chan, (double)amp);
+//	Map
+	if (Map[mod-1][chan].type == TYPE_SIPM) {
+		xy = Map[mod-1][chan].xy;
+		z = Map[mod-1][chan].z;
+		if (z & 1) {	// X
+			Run.hSiPmSelfXZ->Fill(xy+0.5, (z/2) + 0.5);
+		} else {	// Y
+			Run.hSiPmSelfYZ->Fill(24-xy+0.5, (z/2) + 0.5);
+		}
+	}
+	Run.SelfTriggerCnt++;
 }
 
 /*	Read one record.						*/

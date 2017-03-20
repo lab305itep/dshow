@@ -51,6 +51,10 @@
 
 const char *DataFileTypes[] = {"Data files", "*.dat*", "All files", "*", 0, 0};
 const char *SaveFileTypes[] = {"Root files", "*.root", "PDF", "*.pdf", "PostScript", "*.ps", "JPEG", "*.jpg", "GIF", "*.gif", "PNG", "*.png", "All files", "*", 0, 0};
+const struct {
+	double min;
+	double max;
+} RateRange[] = {{1200, 8000}, {100, 1500}, {4, 150}, {0, 5}};
 
 struct common_data_struct Run;
 struct channel_struct Map[MAXWFD][64];
@@ -107,6 +111,9 @@ dshowMainFrame::dshowMainFrame(const TGWindow *p, UInt_t w, UInt_t h) : TGMainFr
 	CreateTimeTab(tab);
 	CreateEventTab(tab);
 	CreateRateTab(tab);
+	CreateSiPmTab(tab);
+	CreatePmtTab(tab);
+	CreateXYZTab(tab);
 	hframe->AddFrame(tab, new TGLayoutHints(kLHintsExpandX | kLHintsExpandY, 5, 5, 3, 4));
 	
    	TGVerticalFrame *vframe=new TGVerticalFrame(hframe, 50, h);
@@ -379,7 +386,6 @@ void dshowMainFrame::CreateRateTab(TGTab *tab)
 {
 	int i, j;
 	char str[128];
-	const Color_t rateColor[6] = {kRed, kGreen, kBlue, kOrange, kCyan+4, kBlack};
 	
 	TGCompositeFrame *me = tab->AddTab("Rates");
 
@@ -388,11 +394,12 @@ void dshowMainFrame::CreateRateTab(TGTab *tab)
 
    	TGHorizontalFrame *hframe=new TGHorizontalFrame(me);
 
-	TGButtonGroup *bg = new TGButtonGroup(hframe, "Rate range", kHorizontalFrame);
-	rRateFast      = new TGRadioButton(bg, "100-&2000  ");
-	rRateMedium    = new TGRadioButton(bg, "&4-200     ");
-	rRateSlow      = new TGRadioButton(bg, "&0-5       ");
-	rRateFast->SetState(kButtonDown);
+	TGButtonGroup *bg = new TGButtonGroup(hframe, "Rate range, Hz", kHorizontalFrame);
+	for (i=0; i<4; i++) {
+		sprintf(str, "%.0f-%.0f  ", RateRange[i].min, RateRange[i].max);
+		rRateRange[i] = new TGRadioButton(bg, str);
+	}
+	rRateRange[1]->SetState(kButtonDown);
    	hframe->AddFrame(bg, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 5, 5, 3, 4));
     	me->AddFrame(hframe, new TGLayoutHints(kLHintsBottom | kLHintsExpandX, 2, 2, 2, 2));
 
@@ -407,16 +414,62 @@ void dshowMainFrame::CreateRateTab(TGTab *tab)
 	}
 	hRateTemplate[0]->GetXaxis()->SetNdivisions(605);
 	hRateTemplate[1]->GetXaxis()->SetNdivisions(504);
-	hRateTemplate[0]->GetXaxis()->SetTimeFormat("%d-%b %H:%M");
+	hRateTemplate[0]->GetXaxis()->SetTimeFormat("%b, %d %H:%M");
 	hRateTemplate[1]->GetXaxis()->SetTimeFormat("%H:%M");
 	RateLegend = new TLegend(0.35, 0.85, 0.75, 0.99);
-	for (j=0; j<2; j++) for (i=0; i<6; i++) {
-		sprintf(str, "fRateFit%d%d", j, i);
-		fRateFit[j][i] = new TF1(str, "pol0");
-		fRateFit[j][i]->SetLineColor(rateColor[i]);
-	}
 	memset(gRateGraph, 0, sizeof(gRateGraph));
 	memset(pdRate, 0, sizeof(pdRate));
+}
+
+/*	Create SiPM tab						*/
+void dshowMainFrame::CreateSiPmTab(TGTab *tab)
+{
+	TGCompositeFrame *me = tab->AddTab("SiPM");
+
+	fSiPmCanvas = new TRootEmbeddedCanvas ("SiPmCanvas", me, 1600, 800);
+   	me->AddFrame(fSiPmCanvas, new TGLayoutHints(kLHintsExpandX | kLHintsExpandY, 10, 10, 10, 1));
+
+   	TGHorizontalFrame *hframe=new TGHorizontalFrame(me);
+
+   	TGTextButton *reset = new TGTextButton(hframe,"&Reset");
+	reset->Connect("Clicked()", "dshowMainFrame", this, "ResetSiPmHists()");
+   	hframe->AddFrame(reset, new TGLayoutHints(kLHintsCenterY | kLHintsRight, 5, 5, 3, 4));
+
+    	me->AddFrame(hframe, new TGLayoutHints(kLHintsBottom | kLHintsExpandX, 2, 2, 2, 2));
+}
+
+/*	Create PMT tab						*/
+void dshowMainFrame::CreatePmtTab(TGTab *tab)
+{
+	TGCompositeFrame *me = tab->AddTab("PMT");
+
+	fPmtCanvas = new TRootEmbeddedCanvas ("PMTCanvas", me, 1600, 800);
+   	me->AddFrame(fPmtCanvas, new TGLayoutHints(kLHintsExpandX | kLHintsExpandY, 10, 10, 10, 1));
+
+   	TGHorizontalFrame *hframe=new TGHorizontalFrame(me);
+
+   	TGTextButton *reset = new TGTextButton(hframe,"&Reset");
+	reset->Connect("Clicked()", "dshowMainFrame", this, "ResetPmtHists()");
+   	hframe->AddFrame(reset, new TGLayoutHints(kLHintsCenterY | kLHintsRight, 5, 5, 3, 4));
+
+    	me->AddFrame(hframe, new TGLayoutHints(kLHintsBottom | kLHintsExpandX, 2, 2, 2, 2));
+}
+
+/*	Create XYZ tab						*/
+void dshowMainFrame::CreateXYZTab(TGTab *tab)
+{
+	TGCompositeFrame *me = tab->AddTab("XYZ");
+
+	fXYZCanvas = new TRootEmbeddedCanvas ("XYZCanvas", me, 1600, 800);
+   	me->AddFrame(fXYZCanvas, new TGLayoutHints(kLHintsExpandX | kLHintsExpandY, 10, 10, 10, 1));
+
+   	TGHorizontalFrame *hframe=new TGHorizontalFrame(me);
+
+   	TGTextButton *reset = new TGTextButton(hframe,"&Reset");
+	reset->Connect("Clicked()", "dshowMainFrame", this, "ResetXYZHists()");
+   	hframe->AddFrame(reset, new TGLayoutHints(kLHintsCenterY | kLHintsRight, 5, 5, 3, 4));
+
+    	me->AddFrame(hframe, new TGLayoutHints(kLHintsBottom | kLHintsExpandX, 2, 2, 2, 2));
 }
 
 /*	Create histogramms						*/
@@ -444,13 +497,28 @@ void dshowMainFrame::InitHist(void)
 		snprintf(strl, sizeof(strl), "Module %2.2d: time versus channels number relative to common SiPM time, amplitude above threshold", i+1);
 		Run.hTimeC[i] = new TH2D(strs, strl, 64, 0, 64, 400, -200, 200);
 	}
-	Run.Rates[0] = new Drate(5L*1.0E9/NSPERCHAN, 40000);
-	Run.Rates[1] = new Drate(5L*1.0E9/NSPERCHAN, 40000);
-	Run.Rates[2] = new Drate(10L*1.0E9/NSPERCHAN, 20000);
-	Run.Rates[3] = new Drate(10L*1.0E9/NSPERCHAN, 20000);
-	Run.Rates[4] = new Drate(10L*1.0E9/NSPERCHAN, 20000);
-	Run.Rates[5] = new Drate(100L*1.0E9/NSPERCHAN, 2000);
+	Run.Rates[0] = new Drate(5L*1.0E9/NSPERCHAN, 2500, 20);
+	Run.Rates[1] = new Drate(5L*1.0E9/NSPERCHAN, 2500, 20);
+	Run.Rates[2] = new Drate(10L*1.0E9/NSPERCHAN, 1250, 20);
+	Run.Rates[3] = new Drate(10L*1.0E9/NSPERCHAN, 1250, 20);
+	Run.Rates[4] = new Drate(10L*1.0E9/NSPERCHAN, 1250, 20);
+	Run.Rates[5] = new Drate(100L*1.0E9/NSPERCHAN, 125, 20);
+	Run.Rates[6] = new Drate(10L*1.0E9/NSPERCHAN, 1250, 20);
 	Run.DisplayEvent->NHits = 0;
+	Run.hSiPmSelfXZ = new TH2D("hSiPmSelfXZ", "SiPM selftrigger occurence;X;Z", 25, 0, 25, 50, 0, 50);
+	Run.hSiPmTrigXZ = new TH2D("hSiPmTrigXZ", "SiPM clean hits occurence;X;Z", 25, 0, 25, 50, 0, 50);
+	Run.hSiPmSelfYZ = new TH2D("hSiPmSelfYZ", "SiPM selftrigger occurence (detector view);Y;Z", 25, 0, 25, 50, 0, 50);
+	Run.hSiPmTrigYZ = new TH2D("hSiPmTrigYZ", "SiPM clean hits occurence (detector view);Y;Z", 25, 0, 25, 50, 0, 50);
+	Run.hPmtTrigXZ = new TH2D("hPmtTrigXZ", "PMT clean hits occurence;X;Z", 5, 0, 5, 5, 0, 5);
+	Run.hPmtTrigYZ = new TH2D("hPmtTrigYZ", "PMT clean hits occurence (detector view);Y;Z", 5, 0, 5, 5, 0, 5);
+	Run.hVetoHits = new TH1D("hVetoHits", "VETO clean hits occurence;Number", 64, 0, 64);
+	Run.hVetoHits->SetFillColor(kBlue);
+	Run.hVetoHits->SetFillStyle(1000);	
+
+	Run.hXYPositron = new TH2D("hXYPositron", "Positron XY;X, cm;Y, cm", 25, 0, 100, 25, 0, 100);
+	Run.hXYNeutron = new TH2D("hXYNeutron", "Neutron XY;X, cm;Y, cm", 25, 0, 100, 25, 0, 100);
+	Run.hZPositron = new TH1D("hZPositron", "Positron Z;Z, cm", 100, 0, 100);
+	Run.hZNeutron = new TH1D("hZNeutron", "Neutron Z;Z, cm", 100, 0, 100);
 }
 
 
@@ -471,15 +539,16 @@ void dshowMainFrame::DoDraw(void)
 	char str[1024];
    	TCanvas *fCanvas;
 	TPaveStats *stat;
+	TVirtualPad *pd;
    	TLatex txt;
    	TLine ln;
 	int mod, chan;
 	int i, j;
 	double h;
 	TH1D *hProj;
-	const char rateName[6][20] = {"Trigger", "VETO", "Positrons", "Neutrons", ">20 MeV", ">20 MeV & !VETO"};
-	const int rateMarker[6] = {20, 21, 22, 23, 24, 25};
-	const Color_t rateColor[6] = {kRed, kGreen, kBlue, kOrange, kCyan+4, kBlack};
+	const Color_t rateColor[] = {kRed, kGreen, kBlue, kOrange, kCyan+2, kBlack, kOrange+2};
+	const char rateName[][20] = {"Trigger", "VETO", "Positrons", "Neutrons", ">20 MeV", ">20 MeV & !VETO", "SelfTriggers"};
+	const int rateMarker[] = {20, 21, 22, 23, 24, 25, 26};
 	double tm;
 
 	mod = nWFD->GetIntNumber() - 1;
@@ -628,44 +697,26 @@ void dshowMainFrame::DoDraw(void)
    	fCanvas = fRateCanvas->GetCanvas();
    	fCanvas->cd();
 	fCanvas->Clear();
-	tm = time(NULL);
+	tm = Run.Event->uTime;
 	hRateTemplate[0]->SetBins(10, tm - 200000, tm);
 	hRateTemplate[1]->SetBins(10, tm - 1800, tm);
 	RateLegend->Clear();
-	for (i=0; i<6; i++) {
-		if (gRateGraph[i]) delete gRateGraph[i];
-		gRateGraph[i] = Run.Rates[i]->GetGraph();
-		if (!gRateGraph[i]) continue;
-		gRateGraph[i]->SetMarkerStyle(rateMarker[i]);
-		gRateGraph[i]->SetMarkerColor(rateColor[i]);
+	for (j=0; j<2; j++) for (i=0; i<7; i++) {
+		if (gRateGraph[j][i]) delete gRateGraph[j][i];
+		gRateGraph[j][i] = (j) ? Run.Rates[i]->GetGraphLong() : Run.Rates[i]->GetGraphShort();
+		if (!gRateGraph[j][i]) continue;
+		gRateGraph[j][i]->SetMarkerStyle(rateMarker[i]);
+		gRateGraph[j][i]->SetMarkerColor(rateColor[i]);
 	}
-	if (rRateFast->IsDown()) {
-		for (i=0; i<2; i++) {
-			hRateTemplate[i]->SetMinimum(100);
-			hRateTemplate[i]->SetMaximum(2000);
-		}
-		for (j=0; j<2; j++) if (gRateGraph[j]) {
-			sprintf(str, "%16s: %6.1f Hz", rateName[j], Run.Rates[j]->GetLast());
-			RateLegend->AddEntry(gRateGraph[j], str, "P");
-		}
-	} else if (rRateMedium->IsDown()) {
-		for (i=0; i<2; i++) {
-			hRateTemplate[i]->SetMinimum(5);
-			hRateTemplate[i]->SetMaximum(200);
-		}
-		for (j=2; j<5; j++) if (gRateGraph[j]) {
-			sprintf(str, "%16s: %6.1f Hz", rateName[j], Run.Rates[j]->GetLast());
-			RateLegend->AddEntry(gRateGraph[j], str, "P");
-		}
-	} else {
-		for (i=0; i<2; i++) {
-			hRateTemplate[i]->SetMinimum(0);
-			hRateTemplate[i]->SetMaximum(5);
-		}
-		for (j=5; j<6; j++) if (gRateGraph[j]) {
-			sprintf(str, "%16s: %6.1f Hz", rateName[j], Run.Rates[j]->GetLast());
-			RateLegend->AddEntry(gRateGraph[j], str, "P");
-		}
+	for (j=0; j<4; j++) if (rRateRange[j]->IsDown()) break;
+	if (j == 4) j = 1;
+	for (i=0; i<2; i++) {
+		hRateTemplate[i]->SetMinimum(RateRange[j].min);
+		hRateTemplate[i]->SetMaximum(RateRange[j].max);
+	}
+	for (i=0; i<7; i++) if (gRateGraph[0][i] && Run.Rates[i]->GetLast() > RateRange[j].min && Run.Rates[i]->GetLast() < RateRange[j].max) {
+		sprintf(str, "%16s: %6.1f [%6.1f] Hz", rateName[i], Run.Rates[i]->GetAverage(), Run.Rates[i]->GetLast());
+		RateLegend->AddEntry(gRateGraph[0][i], str, "P");
 	}
 	
 	for (j=0; j<2; j++) {
@@ -676,21 +727,58 @@ void dshowMainFrame::DoDraw(void)
 		pdRate[j]->SetRightMargin(0.02);
 
 		hRateTemplate[j]->Draw();
-		stat = (TPaveStats *) hRateTemplate[j]->FindObject("stats");
-		if (stat) stat->SetOptFit(0);
 
-		for (i=0; i<6; i++) if (gRateGraph[i]) {
-			gRateGraph[i]->Draw("P");
-//			gRateGraph[i]->Fit(fRateFit[j][i], "Q");
-//			txt.SetTextColor(rateColor[i]);
-//			sprintf(str, "%16s: %6.1f #pm %6.1f [%6.1f] Hz", rateName[j], fRateFit[j][i]->GetParameter(0), 
-//				fRateFit[j][i]->GetParError(0), Run.Rates[j]->GetLast());
-//			txt.DrawLatex(1.05*fRateFit[j][i]->GetParameter(0), hRateTemplate[j]->GetBinCenter(3), str);
-		}
+		for (i=0; i<7; i++) if (gRateGraph[1-j][i]) gRateGraph[1-j][i]->Draw("P");
 		if (!j) RateLegend->Draw();
 	}
 	
    	fCanvas->Update();
+
+/*		SiPM				*/
+   	fCanvas = fSiPmCanvas->GetCanvas();
+   	fCanvas->cd();
+	fCanvas->Clear();
+	fCanvas->Divide(2, 2);
+   	fCanvas->cd(1);
+	Run.hSiPmSelfYZ->Draw("colz");
+   	fCanvas->cd(2);
+	Run.hSiPmSelfXZ->Draw("colz");
+   	fCanvas->cd(3);
+	Run.hSiPmTrigYZ->Draw("colz");
+   	fCanvas->cd(4);
+	Run.hSiPmTrigXZ->Draw("colz");
+   	fCanvas->Update();
+
+/*		PMT				*/
+   	fCanvas = fPmtCanvas->GetCanvas();
+   	fCanvas->cd();
+	fCanvas->Clear();
+	fCanvas->Divide(1, 2);
+   	pd = fCanvas->cd(1);
+	pd->Divide(2, 1);
+	pd->cd(1);
+	Run.hPmtTrigYZ->Draw("colz");
+	pd->cd(2);
+	Run.hPmtTrigXZ->Draw("colz");
+   	fCanvas->cd(2);
+	Run.hVetoHits->Draw();
+   	fCanvas->Update();
+
+/*		XYZ				*/
+   	fCanvas = fXYZCanvas->GetCanvas();
+   	fCanvas->cd();
+	fCanvas->Clear();
+	fCanvas->Divide(2, 2);
+   	fCanvas->cd(1);
+	Run.hXYPositron->Draw("colz");
+   	fCanvas->cd(2);
+	Run.hZPositron->Draw();
+   	fCanvas->cd(3);
+	Run.hXYNeutron->Draw("colz");
+   	fCanvas->cd(4);
+	Run.hZNeutron->Draw();
+   	fCanvas->Update();
+
 
 	TThread::UnLock();
 }
@@ -854,6 +942,17 @@ void dshowMainFrame::SaveDialog(void)
 				Run.hTimeB[i]->Write();	// time versus channel - events, with fixed threshold
 				Run.hTimeC[i]->Write();	// channel time - common SiPM time, TimeB thresholds
 			}
+			Run.hSiPmSelfXZ->Write();
+			Run.hSiPmTrigXZ->Write();
+			Run.hSiPmSelfYZ->Write();
+			Run.hSiPmTrigYZ->Write();
+			Run.hPmtTrigXZ->Write();
+			Run.hPmtTrigYZ->Write();
+			Run.hVetoHits->Write();
+			Run.hXYPositron->Write();
+			Run.hXYNeutron->Write();
+			Run.hZPositron->Write();
+			Run.hZNeutron->Write();
 			f->Close();
 			delete f;
 		} else if (!strcmp(name_end, "ps") || !strcmp(name_end, "pdf")) {
@@ -866,8 +965,11 @@ void dshowMainFrame::SaveDialog(void)
 			fTimeCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
 			fEventCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
 			fRateCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
+			fSiPmCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
+			fPmtCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
+			fXYZCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
 			sprintf(str, "%s]", SaveFile->fFilename);
-			fRateCanvas->GetCanvas()->Print(str, (Option_t *)name_end);			
+			fXYZCanvas->GetCanvas()->Print(str, (Option_t *)name_end);			
 		} else {
 			sprintf(str, "%s.wave.%s", name_beg, name_end);
 			fWaveCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
@@ -881,6 +983,12 @@ void dshowMainFrame::SaveDialog(void)
 			fEventCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
 			sprintf(str, "%s.rate.%s", name_beg, name_end);
 			fRateCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
+			sprintf(str, "%s.sipm.%s", name_beg, name_end);
+			fSiPmCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
+			sprintf(str, "%s.pmt.%s", name_beg, name_end);
+			fPmtCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
+			sprintf(str, "%s.xyz.%s", name_beg, name_end);
+			fXYZCanvas->GetCanvas()->Print(str, (Option_t *)name_end);
 		}
 		free(name_beg);
 		TThread::UnLock();
@@ -916,6 +1024,9 @@ void dshowMainFrame::Reset(void)
 	ResetSelfHists();
 	ResetSpectrumHists();
 	ResetTimeHists();
+	ResetSiPmHists();
+	ResetPmtHists();
+	ResetXYZHists();
 }
 
 void dshowMainFrame::ResetSelfHists(void)
@@ -947,6 +1058,29 @@ void dshowMainFrame::ResetTimeHists(void)
 		Run.hTimeC[i]->Reset();
 	}
 	TThread::UnLock();
+}
+
+void dshowMainFrame::ResetSiPmHists(void)
+{
+	Run.hSiPmSelfXZ->Reset();
+	Run.hSiPmTrigXZ->Reset();
+	Run.hSiPmSelfYZ->Reset();
+	Run.hSiPmTrigYZ->Reset();
+}
+
+void dshowMainFrame::ResetPmtHists(void)
+{
+	Run.hPmtTrigXZ->Reset();
+	Run.hPmtTrigYZ->Reset();
+	Run.hVetoHits->Reset();
+}
+
+void dshowMainFrame::ResetXYZHists(void)
+{
+	Run.hXYPositron->Reset();
+	Run.hXYNeutron->Reset();
+	Run.hZPositron->Reset();
+	Run.hZNeutron->Reset();
 }
 
 void dshowMainFrame::Connect2Online(void)

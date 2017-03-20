@@ -71,7 +71,19 @@ struct common_data_struct {
 	TH2D *hTimeA[MAXWFD];	// time versus channel - events, no threshold
 	TH2D *hTimeB[MAXWFD];	// time versus channel - events, with fixed threshold
 	TH2D *hTimeC[MAXWFD];	// channel time - common SiPM time, TimeB thresholds
-	Drate *Rates[6];	// Frequency meters
+	TH2D *hSiPmSelfXZ;
+	TH2D *hSiPmTrigXZ;
+	TH2D *hSiPmSelfYZ;
+	TH2D *hSiPmTrigYZ;
+	TH2D *hPmtTrigXZ;
+	TH2D *hPmtTrigYZ;
+	TH1D *hVetoHits;
+	TH2D *hXYPositron;
+	TH2D *hXYNeutron;
+	TH1D *hZPositron;
+	TH1D *hZNeutron;
+	Drate *Rates[7];	// Frequency meters
+	int SelfTriggerCnt;
 //		Events
 	struct event_struct *DisplayEvent;	// selected event for display
 	volatile int DisplayType;
